@@ -1,0 +1,53 @@
+# ============================================================
+# WODOGA PLATFORM — BACKEND DEPENDENCIES
+# Python 3.11+
+# ============================================================
+
+# Core framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# Database
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+pyotp==2.9.0
+cryptography==42.0.7
+
+# Request validation
+pydantic==2.7.1
+pydantic-settings==2.2.1
+email-validator==2.1.1
+
+# Azure integrations
+azure-storage-blob==12.20.0
+azure-identity==1.16.0
+
+# HTTP client (for eligibility API calls)
+httpx==0.27.0
+
+# Rate limiting
+slowapi==0.1.9
+
+# Background tasks
+celery==5.4.0
+redis==5.0.4
+
+# Utilities
+python-dotenv==1.0.1
+python-dateutil==2.9.0
+phonenumbers==8.13.37
+
+# Security headers
+secure==0.3.0
+
+# Testing
+pytest==8.2.0
+pytest-asyncio==0.23.6
+httpx==0.27.0

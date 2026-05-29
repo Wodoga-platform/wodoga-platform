@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ───────────────────────────────────────────────────── */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans;
+    min-height: 100vh;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar        { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { @apply bg-surface-border rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-ink-4; }
+
+  /* Focus ring */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-forest-light;
+  }
+
+  input, textarea, select {
+    @apply text-ink;
+  }
+}
+
+/* ── Component Utilities ────────────────────────────────────── */
+@layer components {
+
+  /* Page container */
+  .page-container {
+    @apply p-7 max-w-full;
+  }
+
+  /* Card */
+  .card {
+    @apply bg-surface border border-surface-border rounded-lg shadow-sm overflow-hidden;
+  }
+
+  .card-header {
+    @apply px-5 py-4 border-b border-surface-border flex items-center justify-between;
+  }
+
+  .card-body {
+    @apply p-5;
+  }
+
+  /* Form inputs */
+  .form-input {
+    @apply w-full px-3 py-2.5 bg-bg border border-surface-border rounded
+           text-ink text-sm font-sans
+           focus:outline-none focus:border-forest-light focus:ring-2 focus:ring-forest-light/10
+           placeholder:text-ink-4
+           transition-colors duration-150;
+  }
+
+  .form-label {
+    @apply block text-[11px] font-bold text-ink-3 uppercase tracking-wide mb-1.5;
+  }
+
+  .form-select {
+    @apply form-input cursor-pointer;
+  }
+
+  .form-textarea {
+    @apply form-input resize-y min-h-[80px] leading-relaxed;
+  }
+
+  /* Data table */
+  .data-table {
+    @apply w-full border-collapse;
+  }
+
+  .data-table th {
+    @apply text-left px-3.5 py-2.5 text-[11px] font-bold text-ink-3
+           uppercase tracking-wide bg-bg border-b border-surface-border
+           whitespace-nowrap;
+  }
+
+  .data-table td {
+    @apply px-3.5 py-3 text-sm border-b border-surface-borderLt align-middle;
+  }
+
+  .data-table tbody tr {
+    @apply transition-colors duration-100 cursor-pointer;
+  }
+
+  .data-table tbody tr:hover td {
+    @apply bg-bg;
+  }
+
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Section title */
+  .section-title {
+    @apply text-[11px] font-extrabold text-ink-3 uppercase tracking-widest
+           mb-3 pb-2.5 border-b border-surface-border;
+  }
+
+  /* Page title */
+  .page-title {
+    @apply font-display text-2xl font-semibold text-ink tracking-tight leading-tight;
+  }
+
+  .page-subtitle {
+    @apply text-sm text-ink-3 mt-1;
+  }
+
+  /* Pipeline column */
+  .pipeline-col {
+    @apply flex-1 min-w-[180px] border-r border-surface-border last:border-r-0 px-3;
+  }
+
+  .pipeline-card {
+    @apply bg-surface border border-surface-border rounded p-3 mb-2
+           cursor-pointer shadow-xs transition-all duration-150
+           hover:shadow hover:-translate-y-px;
+  }
+}
