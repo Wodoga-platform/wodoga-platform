@@ -99,6 +99,7 @@ export default function PatientsPage() {
     createMutation.mutate({
       ...rest,
       email:     rest.email || undefined,
+      blood_type: rest.blood_type as any,
       allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
       insurance_primary: insurance_provider
         ? { provider: insurance_provider, member_id: insurance_member_id || '' }
@@ -510,6 +511,4 @@ export default function PatientsPage() {
   );
 }
 
-// Import used in detail panel
-import { fmtTime, VISIT_TYPE_LABEL as VTL } from '@/utils';
-const VISIT_TYPE_LABEL = VTL;
+
