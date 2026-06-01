@@ -14,8 +14,8 @@ import {
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, visitService, medicationService } from '@/services';
 import {
-  fmtDate, calcAge, cn, PATIENT_STATUS_BADGE,
-  FALL_RISK_BADGE, truncate,
+  fmtDate, fmtTime, calcAge, cn, PATIENT_STATUS_BADGE,
+  FALL_RISK_BADGE, truncate, VISIT_TYPE_LABEL
 } from '@/utils';
 import type { Patient } from '@/types';
 
