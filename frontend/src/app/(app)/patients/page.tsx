@@ -365,7 +365,7 @@ export default function PatientsPage() {
                           <div className="mt-1.5 w-2.5 h-2.5 rounded-full border-2 border-forest bg-white flex-shrink-0" />
                           <div className="flex-1">
                             <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold">{VISIT_TYPE_LABEL[v.visit_type]}</span>
+                              <span className="text-sm font-semibold">{v.visit_type.replace(/_/g, ' ')}</span>
                               <Badge variant={v.status === 'completed' ? 'green' : v.status === 'scheduled' ? 'blue' : 'gray'}>
                                 {v.status}
                               </Badge>
