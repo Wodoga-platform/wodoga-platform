@@ -9,6 +9,7 @@ GET    /api/v1/patients/{id}/summary Full patient summary (all linked records)
 """
 
 from typing import Optional
+from datetime import datetime, date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -279,7 +280,7 @@ async def create_patient(
             "org_id":            str(current_user.organization_id),
             "first_name":        body.first_name,
             "last_name":         body.last_name,
-            "dob":               body.date_of_birth,
+            "dob": datetime.strptime(body.date_of_birth, '%Y-%m-%d').date() if isinstance(body.date_of_birth, str) else body.date_of_birth,
             "gender":            body.gender,
             "phone":             body.phone,
             "email":             body.email,
