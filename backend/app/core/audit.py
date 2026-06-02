@@ -1,3 +1,4 @@
+import json
 """
 Wodoga Platform — Audit Logging Service
 """
@@ -127,8 +128,8 @@ class AuditLogger:
                     "ip_address":     ip_address,
                     "user_agent":     user_agent,
                     "request_id":     request_id,
-                    "previous_state": str(previous_state) if previous_state else None,
-                    "new_state":      str(new_state) if new_state else None,
+                    "previous_state": json.dumps(previous_state) if previous_state else None,
+                    "new_state":      json.dumps(new_state) if new_state else None,
                     "success":        success,
                     "error_message":  error_message,
                 },
