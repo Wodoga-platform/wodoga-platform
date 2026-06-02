@@ -80,8 +80,7 @@ async def get_tenant_db(
         try:
             # Set the RLS context variable for this connection
             await session.execute(
-                text("SET LOCAL app.organization_id = :org_id"),
-                {"org_id": str(organization_id)},
+            await db.execute(text(f"SET LOCAL app.organization_id = '{str(organization_id)}'")),
             )
             yield session
             await session.commit()
