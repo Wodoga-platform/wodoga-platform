@@ -80,8 +80,7 @@ async def get_db_for_tenant(
             # This single line activates all RLS policies
             from sqlalchemy import text
             await session.execute(
-                text("SET LOCAL app.organization_id = :org_id"),
-                {"org_id": str(current_user.organization_id)},
+                text(f"SET LOCAL app.organization_id = '{str(current_user.organization_id)}'")
             )
             yield session
             await session.commit()
