@@ -281,7 +281,7 @@ async def create_patient(
             "first_name":        body.first_name,
             "last_name":         body.last_name,
             "dob": datetime.strptime(body.date_of_birth, '%Y-%m-%d').date() if isinstance(body.date_of_birth, str) else body.date_of_birth,
-            "gender": body.gender or None,
+            "gender": body.gender.lower().replace('-', '_') if body.gender else None,
             "phone":             body.phone,
             "email":             body.email,
             "addr1":             body.address_line1,
