@@ -12,6 +12,7 @@ DELETE /api/v1/visits/{id}            Cancel a visit
 
 from typing import Optional
 from uuid import UUID
+from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -224,7 +225,7 @@ async def create_visit(
             "patient":    str(body.patient_id),
             "caregiver":  str(body.caregiver_id) if body.caregiver_id else None,
             "care_plan":  str(body.care_plan_id) if body.care_plan_id else None,
-            "date":       body.visit_date,
+            "date": datetime.strptime(body.visit_date, '%Y-%m-%d').date() if body.visit_date else None,
             "time":       body.visit_time,
             "type":       body.visit_type,
             "notes":      body.notes,
