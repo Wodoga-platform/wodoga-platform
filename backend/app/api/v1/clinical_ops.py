@@ -849,7 +849,7 @@ async def create_oasis(
                 clinical_notes, status
             ) VALUES (
                 :org, :patient, :by,
-                :type, :date, :responses::jsonb,
+                :type, :date, :responses,
                 :m1032, :m1800, :m2020, :notes, 'submitted'
             ) RETURNING id, assessment_type, assessment_date
         """),
