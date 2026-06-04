@@ -66,6 +66,7 @@ export default function VisitsPage() {
     onError: () => toast.error('Failed to update visit status.'),
   });
 
+  
   // ── GPS check-in ──────────────────────────────────────────
   const checkinMut = useMutation({
     mutationFn: ({ id, lat, lon }: { id: string; lat?: number; lon?: number }) =>
@@ -160,8 +161,7 @@ export default function VisitsPage() {
                 </thead>
                 <tbody>
                   {visits.map(v => (
-                    <tr
-                      key={v.id}
+                    <tr key={v.id} onClick={() => setSelected(v === selected ? null : v)} style={{ cursor: 'pointer', background: selected?.id === v.id ? '#F0FAF2' : undefined }}>
                       onClick={() => setSelected(v)}
                       className={cn('cursor-pointer', selected?.id === v.id && 'bg-forest-ghost/40')}
                     >
