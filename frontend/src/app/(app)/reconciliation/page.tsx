@@ -24,7 +24,7 @@ export default function ReconciliationPage() {
       if (res.conflicts_found === 0) {
         toast.success('No conflicts found ✓');
       } else {
-        toast.error(`${res.data.conflicts_found} conflict(s) detected`);
+        toast.error(`${res.conflicts_found} conflict(s) detected`);
       }
     },
     onError: () => toast.error('Reconciliation failed. Please try again.'),
