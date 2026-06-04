@@ -860,7 +860,7 @@ async def create_oasis(
             "type": body.get("assessment_type"),
             "date": datetime.strptime(body.get("assessment_date"), '%Y-%m-%d').date() if body.get("assessment_date") else None,
             "responses": json.dumps(body.get("responses", {})),
-            "m1032": body.get("m1032_hospitalization_risk"),
+            "m1032": bool(int(body.get("m1032_hospitalization_risk", 0))) if body.get("m1032_hospitalization_risk") is not None else None,
             "m1800": body.get("m1800_grooming"),
             "m2020": body.get("m2020_oral_medications"),
             "notes": body.get("clinical_notes"),
