@@ -55,7 +55,7 @@ export default function VisitsPage() {
   // ── Status update ─────────────────────────────────────────
   const updateMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
-      visitService.update(id, { status }),
+      visitService.update(id, { status: status as any }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['visits'] });
       toast.success(`Visit marked as ${vars.status.replace('_', ' ')} ✓`);
