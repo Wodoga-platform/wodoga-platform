@@ -226,7 +226,7 @@ async def create_visit(
             "caregiver":  str(body.caregiver_id) if body.caregiver_id else None,
             "care_plan":  str(body.care_plan_id) if body.care_plan_id else None,
             "date": datetime.strptime(body.visit_date, '%Y-%m-%d').date() if body.visit_date else None,
-            "time":       body.visit_time,
+            "time": datetime.strptime(body.visit_time, '%H:%M').time() if body.visit_time else None,
             "type":       body.visit_type,
             "notes":      body.notes,
         },
@@ -263,7 +263,14 @@ async def update_visit(
     set_clauses, params = [], {"id": str(visit_id)}
     for field, value in updates.items():
         set_clauses.append(f"{field} = :{field}")
-        params[field] = str(value) if isinstance(value, UUID) else value
+        if field == 'visit_time' and isinstance(value, str) and value:
+            params[field] = datetime.strptime(value, '%H:%M').time()
+        elif field == 'visit_date' and isinstance(value, str) and value:
+            params[field] = datetime.strptime(value, '%Y-%m-%d').date()
+        elif isinstance(value, UUID):
+            params[field] = str(value)
+        else:
+            params[field] = value
 
     await db.execute(
         text(f"UPDATE visits SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
