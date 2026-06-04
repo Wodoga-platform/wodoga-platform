@@ -9,6 +9,7 @@ pharm_orders, oasis, messages, staff, notifications, audit_logs
 # ════════════════════════════════════════════════════════════════
 from typing import Optional
 from uuid import UUID
+from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -141,8 +142,9 @@ async def prescribe_medication(
             "by": str(current_user.user_id), "drug": body.drug_name, "brand": body.brand_name,
             "dosage": body.dosage, "unit": body.dosage_unit, "route": body.route,
             "freq": body.frequency, "freq_code": body.frequency_code,
-            "start": body.start_date, "end": body.end_date,
-            "refills": body.refills_remaining, "refill_date": body.next_refill_date,
+            "start": datetime.strptime(body.start_date, '%Y-%m-%d').date() if body.start_date else None,
+"end": datetime.strptime(body.end_date, '%Y-%m-%d').date() if body.end_date else None,
+"refill_date": datetime.strptime(body.next_refill_date, '%Y-%m-%d').date() if body.next_refill_date else None,
             "prescriber": body.prescriber_name, "npi": body.prescriber_npi,
             "pharmacy": body.pharmacy_name, "controlled": body.controlled_substance,
             "schedule": body.schedule, "instructions": body.instructions,
@@ -242,7 +244,7 @@ async def run_reconciliation(
         {
             "org": str(current_user.organization_id), "patient": str(patient_id),
             "by": str(current_user.user_id), "found": len(conflicts_found) > 0,
-            "details": str(conflicts_found),
+            "details": json.dumps(conflicts_found),
         },
     )
     recon_record = recon.mappings().first()
@@ -349,8 +351,9 @@ async def create_care_plan(
         {
             "org": str(current_user.organization_id), "patient": str(body.patient_id),
             "by": str(current_user.user_id), "dx": body.primary_diagnosis,
-            "physician": body.ordering_physician, "start": body.start_date,
-            "end": body.end_date, "review": body.review_date,
+            "physician": body.ordering_physician, "start": datetime.strptime(body.start_date, '%Y-%m-%d').date() if body.start_date else None,
+"end": datetime.strptime(body.end_date, '%Y-%m-%d').date() if body.end_date else None,
+"review": datetime.strptime(body.review_date, '%Y-%m-%d').date() if body.review_date else None,
             "freq": body.visit_frequency, "duration": body.duration,
             "goals": body.goals, "interventions": body.interventions,
             "outcomes": body.expected_outcomes,
@@ -436,7 +439,7 @@ async def create_referral(
         """),
         {
             "org": str(current_user.organization_id), "by": str(current_user.user_id),
-            "fn": body.first_name, "ln": body.last_name, "dob": body.date_of_birth,
+            "fn": body.first_name, "ln": body.last_name, "dob": datetime.strptime(body.date_of_birth, '%Y-%m-%d').date() if body.date_of_birth else None,
             "phone": body.phone, "email": body.email, "source": body.referral_source,
             "physician": body.referring_physician, "dx": body.diagnosis,
             "insurer": body.insurance_provider, "ins_id": body.insurance_id,
@@ -494,7 +497,7 @@ async def advance_referral(
             {
                 "org": str(current_user.organization_id),
                 "fn": ref["first_name"], "ln": ref["last_name"],
-                "dob": ref["date_of_birth"], "phone": ref["phone"],
+                "dob": datetime.strptime(ref["date_of_birth"], '%Y-%m-%d').date() if ref.get("date_of_birth") else None, "phone": ref["phone"],
                 "email": ref["email"],
                 "insurance": f'{{"provider": "{ref["insurance_provider"]}", "member_id": "{ref["insurance_id"]}"}}'
                     if ref["insurance_provider"] else "{}",
@@ -629,7 +632,7 @@ async def submit_claim(
             "visit": str(body.visit_id) if body.visit_id else None,
             "by": str(current_user.user_id), "claim_no": claim_number,
             "service": body.service_type, "cpt": body.cpt_code,
-            "icd": body.icd10_codes or [], "service_date": body.service_date,
+            "icd": body.icd10_codes or [], "service_date": datetime.strptime(body.service_date, '%Y-%m-%d').date() if body.service_date else None,
             "amount": body.amount_billed, "insurer": body.insurance_provider,
             "ins_id": body.insurance_id, "auth": body.prior_auth_number, "notes": body.notes,
         },
@@ -747,7 +750,7 @@ async def create_pharm_order(
             "qty": body.get("quantity"),
             "pharmacy": body.get("pharmacy_name"),
             "ph_phone": body.get("pharmacy_phone"),
-            "delivery": body.get("expected_delivery"),
+            "delivery": datetime.strptime(body.get("expected_delivery"), '%Y-%m-%d').date() if body.get("expected_delivery") else None,
             "urgent": body.get("is_urgent", False),
             "notes": body.get("notes"),
         },
@@ -855,7 +858,7 @@ async def create_oasis(
             "patient": str(body.get("patient_id")),
             "by": str(current_user.user_id),
             "type": body.get("assessment_type"),
-            "date": body.get("assessment_date"),
+            "date": datetime.strptime(body.get("assessment_date"), '%Y-%m-%d').date() if body.get("assessment_date") else None,
             "responses": json.dumps(body.get("responses", {})),
             "m1032": body.get("m1032_hospitalization_risk"),
             "m1800": body.get("m1800_grooming"),
