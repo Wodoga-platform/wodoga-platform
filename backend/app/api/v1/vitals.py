@@ -9,6 +9,7 @@ GET  /api/v1/vitals/alerts            All flagged vitals across the organization
 
 from typing import Optional
 from uuid import UUID
+from datetime import datetime, date, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
@@ -137,7 +138,7 @@ async def record_vitals(
             "patient":       str(body.patient_id),
             "visit":         str(body.visit_id) if body.visit_id else None,
             "recorded_by":   str(current_user.user_id),
-            "recorded_at":   body.recorded_at,
+            "recorded_at": datetime.fromisoformat(body.recorded_at) if isinstance(body.recorded_at, str) and body.recorded_at else datetime.now(timezone.utc),
             "bp_sys":        body.bp_systolic,
             "bp_dia":        body.bp_diastolic,
             "bp_pos":        body.bp_position,
