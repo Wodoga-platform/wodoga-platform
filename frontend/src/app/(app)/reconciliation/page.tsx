@@ -20,8 +20,8 @@ export default function ReconciliationPage() {
   const recoMut = useMutation({
     mutationFn: (pid: string) => medicationService.reconcile(pid),
     onSuccess: (res) => {
-      setResult(res.data);
-      if (res.data.conflicts_found === 0) {
+      setResult(res);
+      if (res.conflicts_found === 0) {
         toast.success('No conflicts found ✓');
       } else {
         toast.error(`${res.data.conflicts_found} conflict(s) detected`);
