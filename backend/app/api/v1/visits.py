@@ -99,13 +99,13 @@ async def list_visits(
         params["status"] = status
     if visit_date:
         conditions.append("v.visit_date = :visit_date")
-        params["visit_date"] = visit_date
+        params["visit_date"] = datetime.strptime(visit_date, '%Y-%m-%d').date()
     if date_from:
         conditions.append("v.visit_date >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = datetime.strptime(date_from, '%Y-%m-%d').date()
     if date_to:
         conditions.append("v.visit_date <= :date_to")
-        params["date_to"] = date_to
+        params["date_to"] = datetime.strptime(date_to, '%Y-%m-%d').date()
 
     # Caregivers only see their own visits
     if current_user.role == "caregiver":
