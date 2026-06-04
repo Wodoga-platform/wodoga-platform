@@ -1,11 +1,9 @@
-'use client';
-
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, MapPin } from 'lucide-react';
-import { Button, Badge, Avatar, EmptyState, PageLoader } from '@/components/ui';
+import { Plus, MapPin, X } from 'lucide-react';
+import { Button, Badge, Avatar, EmptyState, PageLoader, InfoField } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { visitService, patientService, staffService } from '@/services';
 import { fmtDate, fmtTime, VISIT_TYPE_LABEL, cn } from '@/utils';
@@ -13,11 +11,20 @@ import type { Visit } from '@/types';
 
 type Tab = 'scheduled' | 'completed' | 'all';
 
+const STATUS_BADGE: Record<string, any> = {
+  scheduled:   'blue',
+  in_progress: 'amber',
+  completed:   'green',
+  cancelled:   'gray',
+  missed:      'red',
+};
+
 export default function VisitsPage() {
   const qc = useQueryClient();
-  const [tab, setTab]             = useState<Tab>('scheduled');
-  const [schedOpen, setSchedOpen] = useState(false);
-  const [soapVisit, setSoapVisit] = useState<Visit | null>(null);
+  const [tab,        setTab]        = useState<Tab>('scheduled');
+  const [schedOpen,  setSchedOpen]  = useState(false);
+  const [soapVisit,  setSoapVisit]  = useState<Visit | null>(null);
+  const [selected,   setSelected]   = useState<Visit | null>(null);
 
   const statusParam = tab === 'all' ? undefined : tab;
 
@@ -44,11 +51,30 @@ export default function VisitsPage() {
     onError:    () => toast.error('Failed to schedule visit.'),
   });
 
+  // ── Status update ─────────────────────────────────────────
+  const updateMut = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      visitService.update(id, { status }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['visits'] });
+      toast.success(`Visit marked as ${vars.status.replace('_', ' ')} ✓`);
+      // Update selected visit status locally
+      if (selected && selected.id === vars.id) {
+        setSelected({ ...selected, status: vars.status });
+      }
+    },
+    onError: () => toast.error('Failed to update visit status.'),
+  });
+
   // ── GPS check-in ──────────────────────────────────────────
   const checkinMut = useMutation({
     mutationFn: ({ id, lat, lon }: { id: string; lat?: number; lon?: number }) =>
       visitService.checkin(id, lat, lon),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['visits'] }); toast.success('GPS check-in confirmed ✓'); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['visits'] });
+      toast.success('GPS check-in confirmed ✓');
+      if (selected) setSelected({ ...selected, status: 'in_progress', checkin_at: new Date().toISOString() });
+    },
   });
 
   const handleCheckin = (visit: Visit) => {
@@ -66,8 +92,14 @@ export default function VisitsPage() {
   const { register: rsoap, handleSubmit: hsoap, reset: rsoap_reset } = useForm();
   const soapMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => visitService.saveSOAP(id, data),
-    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['visits'] }); toast.success('SOAP note saved ✓'); setSoapVisit(null); rsoap_reset(); },
-    onError:    () => toast.error('Failed to save SOAP note.'),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['visits'] });
+      toast.success('SOAP note saved ✓');
+      setSoapVisit(null);
+      rsoap_reset();
+      if (selected) setSelected({ ...selected, status: 'completed', has_soap_note: true });
+    },
+    onError: () => toast.error('Failed to save SOAP note.'),
   });
 
   const visits = data?.data || [];
@@ -106,84 +138,229 @@ export default function VisitsPage() {
         ))}
       </div>
 
-      <div className="card">
-        {isLoading ? <PageLoader /> : visits.length === 0 ? (
-          <EmptyState icon="🏠" title={`No ${tab} visits`} />
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Patient</th>
-                <th>Caregiver</th>
-                <th>Date & Time</th>
-                <th>Type</th>
-                {tab !== 'completed' && <th>GPS</th>}
-                {tab === 'completed' && <th>SOAP Note</th>}
-                {tab === 'completed' && <th>Duration</th>}
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visits.map(v => (
-                <tr key={v.id}>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <Avatar firstName={v.patient_first} lastName={v.patient_last} size="sm" />
-                      <span className="font-medium text-sm">{v.patient_first} {v.patient_last}</span>
+      <div className="flex gap-5">
+        {/* ── Visits Table ── */}
+        <div className={cn('flex-1 min-w-0', selected ? 'max-w-[calc(100%-420px)]' : '')}>
+          <div className="card">
+            {isLoading ? <PageLoader /> : visits.length === 0 ? (
+              <EmptyState icon="🏠" title={`No ${tab} visits`}
+                action={<Button variant="primary" size="sm" onClick={() => setSchedOpen(true)}>Schedule Visit</Button>}
+              />
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Patient</th>
+                    <th>Caregiver</th>
+                    <th>Date & Time</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visits.map(v => (
+                    <tr
+                      key={v.id}
+                      onClick={() => setSelected(v)}
+                      className={cn('cursor-pointer', selected?.id === v.id && 'bg-forest-ghost/40')}
+                    >
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <Avatar firstName={v.patient_first} lastName={v.patient_last} size="sm" />
+                          <span className="font-medium text-sm">{v.patient_first} {v.patient_last}</span>
+                        </div>
+                      </td>
+                      <td className="text-sm text-ink-2">{v.caregiver_name || <span className="text-ink-4">Unassigned</span>}</td>
+                      <td className="text-sm">
+                        <span className="font-medium">{fmtDate(v.visit_date)}</span>
+                        {v.visit_time && <span className="text-ink-3 font-mono text-xs ml-2">{fmtTime(v.visit_time)}</span>}
+                      </td>
+                      <td className="text-xs">{VISIT_TYPE_LABEL[v.visit_type] || v.visit_type?.replace(/_/g, ' ')}</td>
+                      <td>
+                        <Badge variant={STATUS_BADGE[v.status] || 'gray'}>
+                          {v.status?.replace('_', ' ')}
+                        </Badge>
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <div className="flex gap-1.5">
+                          {v.status === 'scheduled' && !v.checkin_at && (
+                            <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
+                              onClick={() => handleCheckin(v)}>
+                              Check In
+                            </Button>
+                          )}
+                          {(v.status === 'scheduled' || v.status === 'in_progress') && (
+                            <Button size="xs" variant="primary" onClick={() => setSoapVisit(v)}>
+                              Document
+                            </Button>
+                          )}
+                          {v.status === 'completed' && !v.has_soap_note && (
+                            <Button size="xs" variant="amber" onClick={() => setSoapVisit(v)}>
+                              Add SOAP
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* ── Visit Detail Panel ── */}
+        {selected && (
+          <div className="w-[400px] flex-shrink-0">
+            <div className="card sticky top-5">
+              {/* Header */}
+              <div className="p-5 pb-4 bg-gradient-to-br from-forest-ghost to-white border-b border-surface-border">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <Avatar firstName={selected.patient_first} lastName={selected.patient_last} size="lg" square />
+                    <div>
+                      <div className="font-display text-lg font-semibold">
+                        {selected.patient_first} {selected.patient_last}
+                      </div>
+                      <div className="text-xs text-ink-3 mt-0.5">
+                        {VISIT_TYPE_LABEL[selected.visit_type] || selected.visit_type?.replace(/_/g, ' ')}
+                      </div>
                     </div>
-                  </td>
-                  <td className="text-sm text-ink-2">{v.caregiver_name || '—'}</td>
-                  <td className="text-sm">
-                    <span className="font-medium">{fmtDate(v.visit_date)}</span>
-                    {v.visit_time && <span className="text-ink-3 font-mono text-xs ml-2">{fmtTime(v.visit_time)}</span>}
-                  </td>
-                  <td className="text-xs">{VISIT_TYPE_LABEL[v.visit_type] || v.visit_type}</td>
+                  </div>
+                  <button
+                    onClick={() => setSelected(null)}
+                    className="w-7 h-7 flex items-center justify-center rounded border border-surface-border text-ink-3 hover:bg-red-ghost hover:text-red transition-colors text-xs"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
 
-                  {tab !== 'completed' && (
-                    <td>
-                      {v.checkin_at
-                        ? <Badge variant="green"><MapPin size={10} className="inline mr-1" />Checked In</Badge>
-                        : v.status === 'scheduled'
-                          ? <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
-                              onClick={() => handleCheckin(v)}>Check In</Button>
-                          : <span className="text-ink-4 text-xs">—</span>
-                      }
-                    </td>
+                {/* Status badge */}
+                <div className="mt-3">
+                  <Badge variant={STATUS_BADGE[selected.status] || 'gray'} className="text-xs">
+                    {selected.status?.replace('_', ' ')}
+                  </Badge>
+                  {selected.checkin_at && (
+                    <span className="ml-2 text-xs text-green font-medium">
+                      <MapPin size={10} className="inline mr-0.5" />Checked In
+                    </span>
                   )}
+                </div>
+              </div>
 
-                  {tab === 'completed' && (
-                    <td>
-                      {v.has_soap_note
-                        ? <Badge variant="green">✓ Documented</Badge>
-                        : <Button size="xs" variant="amber" onClick={() => setSoapVisit(v)}>Add SOAP</Button>
-                      }
-                    </td>
-                  )}
+              <div className="p-5 max-h-[65vh] overflow-y-auto space-y-4">
 
-                  {tab === 'completed' && (
-                    <td className="text-xs text-ink-3">{v.duration_minutes ? `${v.duration_minutes} min` : '—'}</td>
-                  )}
+                {/* Visit Details */}
+                <div>
+                  <div className="section-title">Visit Information</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <InfoField label="Date" value={fmtDate(selected.visit_date)} />
+                    <InfoField label="Time" value={selected.visit_time ? fmtTime(selected.visit_time) : '—'} />
+                    <InfoField label="Caregiver" value={selected.caregiver_name || 'Unassigned'} />
+                    <InfoField label="Duration" value={selected.duration_minutes ? `${selected.duration_minutes} min` : '—'} />
+                  </div>
+                  {selected.notes && <InfoField label="Notes" value={selected.notes} />}
+                </div>
 
-                  <td>
-                    <Badge variant={
-                      v.status === 'completed'   ? 'green' :
-                      v.status === 'scheduled'   ? 'blue'  :
-                      v.status === 'in_progress' ? 'amber' : 'gray'
-                    }>
-                      {v.status.replace('_', ' ')}
-                    </Badge>
-                  </td>
+                {/* GPS Info */}
+                {(selected.checkin_at || selected.checkout_at) && (
+                  <div>
+                    <div className="section-title">GPS Tracking</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {selected.checkin_at && (
+                        <InfoField label="Check-In" value={new Date(selected.checkin_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
+                      )}
+                      {selected.checkout_at && (
+                        <InfoField label="Check-Out" value={new Date(selected.checkout_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
+                      )}
+                      {selected.checkin_lat && (
+                        <InfoField label="Location" value={`${Number(selected.checkin_lat).toFixed(4)}, ${Number(selected.checkin_lon).toFixed(4)}`} />
+                      )}
+                    </div>
+                  </div>
+                )}
 
-                  <td>
-                    {v.status === 'scheduled' && (
-                      <Button size="xs" variant="primary" onClick={() => setSoapVisit(v)}>Document</Button>
+                {/* SOAP Note */}
+                {selected.soap_subjective && (
+                  <div>
+                    <div className="section-title">SOAP Note</div>
+                    <div className="space-y-2">
+                      {[
+                        { label: 'S — Subjective', value: selected.soap_subjective, color: '#1d4ed8' },
+                        { label: 'O — Objective',  value: selected.soap_objective,  color: '#7c3aed' },
+                        { label: 'A — Assessment', value: selected.soap_assessment, color: '#b45309' },
+                        { label: 'P — Plan',        value: selected.soap_plan,       color: '#166534' },
+                      ].map(({ label, value, color }) => value ? (
+                        <div key={label} className="p-3 bg-bg rounded border border-surface-border">
+                          <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color }}>{label}</div>
+                          <div className="text-sm text-ink-2 leading-relaxed">{value}</div>
+                        </div>
+                      ) : null)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Status Actions */}
+                <div>
+                  <div className="section-title">Update Status</div>
+                  <div className="flex flex-wrap gap-2">
+                    {selected.status === 'scheduled' && (
+                      <>
+                        {!selected.checkin_at && (
+                          <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
+                            loading={checkinMut.isPending}
+                            onClick={() => handleCheckin(selected)}>
+                            GPS Check In
+                          </Button>
+                        )}
+                        <Button size="xs" variant="primary"
+                          onClick={() => setSoapVisit(selected)}>
+                          Document Visit
+                        </Button>
+                        <Button size="xs" variant="secondary"
+                          loading={updateMut.isPending}
+                          onClick={() => updateMut.mutate({ id: selected.id, status: 'missed' })}>
+                          Mark Missed
+                        </Button>
+                        <Button size="xs" className="bg-red-ghost text-red border border-red-pale"
+                          loading={updateMut.isPending}
+                          onClick={() => updateMut.mutate({ id: selected.id, status: 'cancelled' })}>
+                          Cancel Visit
+                        </Button>
+                      </>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    {selected.status === 'in_progress' && (
+                      <>
+                        <Button size="xs" variant="primary"
+                          onClick={() => setSoapVisit(selected)}>
+                          Document & Complete
+                        </Button>
+                        <Button size="xs" variant="secondary"
+                          loading={updateMut.isPending}
+                          onClick={() => updateMut.mutate({ id: selected.id, status: 'completed' })}>
+                          Mark Completed
+                        </Button>
+                      </>
+                    )}
+                    {selected.status === 'completed' && !selected.has_soap_note && (
+                      <Button size="xs" variant="amber"
+                        onClick={() => setSoapVisit(selected)}>
+                        Add SOAP Note
+                      </Button>
+                    )}
+                    {selected.status === 'completed' && selected.has_soap_note && (
+                      <Button size="xs" variant="secondary"
+                        onClick={() => setSoapVisit(selected)}>
+                        Edit SOAP Note
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -244,7 +421,7 @@ export default function VisitsPage() {
           open={!!soapVisit}
           onClose={() => { setSoapVisit(null); rsoap_reset(); }}
           title="SOAP Visit Note"
-          subtitle={`${soapVisit.patient_first} ${soapVisit.patient_last} · ${fmtDate(soapVisit.visit_date)} · ${VISIT_TYPE_LABEL[soapVisit.visit_type]}`}
+          subtitle={`${soapVisit.patient_first} ${soapVisit.patient_last} · ${fmtDate(soapVisit.visit_date)} · ${VISIT_TYPE_LABEL[soapVisit.visit_type] || soapVisit.visit_type}`}
           size="lg"
           footer={
             <ModalFooter>
@@ -255,7 +432,7 @@ export default function VisitsPage() {
                   duration_minutes: d.duration ? parseInt(d.duration) : undefined,
                   visit_status: 'completed',
                 }}))}>
-                Save SOAP Note
+                Save & Complete Visit
               </Button>
             </ModalFooter>
           }
@@ -291,7 +468,7 @@ export default function VisitsPage() {
               <input type="number" className="form-input" defaultValue={60} min={5} {...rsoap('duration')} />
             </div>
             <div>
-              <label className="form-label">Visit Status</label>
+              <label className="form-label">Final Status</label>
               <select className="form-select" {...rsoap('visit_status')}>
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
