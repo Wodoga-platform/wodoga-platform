@@ -282,7 +282,7 @@ async def vitals_alerts(
               )
             ORDER BY v.recorded_at DESC
         """),
-        {"days": days},
+        {"days": str(days)},
     )
     return {"data": [dict(r) for r in result.mappings().all()]}
 
