@@ -99,7 +99,7 @@ export default function PatientsPage() {
   const onSubmit = (data: PatientForm) => {
     const { allergies_str, insurance_provider, insurance_member_id, ...rest } = data;
     createMutation.mutate({
-      ...rest,
+      ...(rest as any),
       email:     rest.email || undefined,
       allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
       insurance_primary: insurance_provider
