@@ -12,7 +12,7 @@ import {
 import { cn, ROLE_DISPLAY } from '@/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { Avatar, Badge, Spinner } from '@/components/ui';
-import { notificationService } from '@/services';
+import { notificationService, patientService } from '@/services';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import type { Permission } from '@/types';
 
@@ -58,6 +58,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   const [notifOpen, setNotifOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Live patient search for the global search bar
+  const { data: searchResults } = useQuery({
+    queryKey: ['global-search', searchQ],
+    queryFn:  () => patientService.list({ search: searchQ, per_page: 6 }),
+    enabled:  searchQ.trim().length >= 2,
+  });
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -114,11 +123,45 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
             <input
               type="text"
-              placeholder="Search patients, staff..."
+              placeholder="Search patients..."
+              value={searchQ}
+              onChange={e => { setSearchQ(e.target.value); setSearchOpen(true); }}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && searchResults?.data?.[0]) {
+                  router.push(`/patients/${searchResults.data[0].id}`);
+                  setSearchQ(''); setSearchOpen(false);
+                }
+              }}
               className="w-full bg-white/10 border border-white/15 rounded text-white
                          text-sm placeholder:text-white/40 pl-8 pr-3 py-1.5
                          focus:outline-none focus:bg-white/15 focus:border-white/30 transition-colors"
             />
+            {searchOpen && searchQ.trim().length >= 2 && (
+              <div className="absolute top-full left-0 right-0 mt-1.5 bg-white rounded-lg shadow-xl border border-surface-border overflow-hidden z-50">
+                {!searchResults?.data?.length ? (
+                  <div className="px-3 py-3 text-sm text-ink-3">No patients found</div>
+                ) : (
+                  searchResults.data.map(p => (
+                    <button
+                      key={p.id}
+                      onMouseDown={() => {
+                        router.push(`/patients/${p.id}`);
+                        setSearchQ(''); setSearchOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-forest-ghost text-left transition-colors border-b border-surface-borderLt last:border-0"
+                    >
+                      <Avatar firstName={p.first_name} lastName={p.last_name} seed={p.id} size="sm" />
+                      <div>
+                        <div className="text-sm font-semibold text-ink">{p.first_name} {p.last_name}</div>
+                        <div className="text-xs text-ink-3">{p.primary_diagnosis || p.phone || 'Patient record'}</div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
 
