@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -8,7 +9,7 @@ import { Button, Badge, Avatar, EmptyState, PageLoader, InfoField } from '@/comp
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { visitService, patientService, staffService } from '@/services';
 import { fmtDate, fmtTime, VISIT_TYPE_LABEL, cn } from '@/utils';
-import type { Visit } from '@/types';
+import type { Visit, VisitStatus } from '@/types';
 
 type Tab = 'scheduled' | 'completed' | 'all';
 
@@ -54,8 +55,8 @@ export default function VisitsPage() {
 
   // ── Status update ─────────────────────────────────────────
   const updateMut = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      visitService.update(id, { status: status as any }),
+    mutationFn: ({ id, status }: { id: string; status: VisitStatus }) =>
+      visitService.update(id, { status }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['visits'] });
       toast.success(`Visit marked as ${vars.status.replace('_', ' ')} ✓`);
@@ -67,7 +68,6 @@ export default function VisitsPage() {
     onError: () => toast.error('Failed to update visit status.'),
   });
 
-  
   // ── GPS check-in ──────────────────────────────────────────
   const checkinMut = useMutation({
     mutationFn: ({ id, lat, lon }: { id: string; lat?: number; lon?: number }) =>
@@ -162,7 +162,8 @@ export default function VisitsPage() {
                 </thead>
                 <tbody>
                   {visits.map(v => (
-                    <tr key={v.id} onClick={() => setSelected(v === selected ? null : v)} style={{ cursor: 'pointer', background: selected?.id === v.id ? '#F0FAF2' : undefined }}>
+                    <tr
+                      key={v.id}
                       onClick={() => setSelected(v)}
                       className={cn('cursor-pointer', selected?.id === v.id && 'bg-forest-ghost/40')}
                     >
