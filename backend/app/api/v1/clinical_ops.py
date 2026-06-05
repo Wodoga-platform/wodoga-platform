@@ -7,6 +7,7 @@ pharm_orders, oasis, messages, staff, notifications, audit_logs
 # ════════════════════════════════════════════════════════════════
 # MEDICATIONS
 # ════════════════════════════════════════════════════════════════
+import json
 from typing import Optional
 from uuid import UUID
 
@@ -489,16 +490,15 @@ async def advance_referral(
                     phone, email, insurance_primary, notes, status
                 ) VALUES (
                     :org, :fn, :ln, :dob, :phone, :email,
-                    :insurance::jsonb, :notes, 'active'
+                    :insurance, :notes, 'active'
                 ) RETURNING id
             """),
             {
                 "org": str(current_user.organization_id),
                 "fn": ref["first_name"], "ln": ref["last_name"],
-                "dob": ref["date_of_birth"], "phone": ref["phone"],
-                "email": ref["email"],
-                "insurance": f'{{"provider": "{ref["insurance_provider"]}", "member_id": "{ref["insurance_id"]}"}}'
-                    if ref["insurance_provider"] else "{}",
+                "dob": ref["date_of_birth"],
+                "phone": ref["phone"], "email": ref["email"],
+                "insurance": json.dumps({"provider": ref["insurance_provider"] or "", "member_id": ref["insurance_id"] or ""}),
                 "notes": f"Admitted via referral from {ref['referral_source'] or 'unknown'}",
             },
         )
@@ -837,7 +837,6 @@ async def create_oasis(
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
 ):
-    import json
     result = await db.execute(
         text("""
             INSERT INTO oasis_assessments (
