@@ -8,6 +8,7 @@ pharm_orders, oasis, messages, staff, notifications, audit_logs
 # MEDICATIONS
 # ════════════════════════════════════════════════════════════════
 import json
+from datetime import datetime, date
 from typing import Optional
 from uuid import UUID
 
@@ -19,6 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import Permission, TokenPayload, require_permissions
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
+
+
+def _to_date(val):
+    """Convert a 'YYYY-MM-DD' string to a date object for asyncpg DATE columns. Pass through None/date."""
+    if isinstance(val, str) and val:
+        return datetime.strptime(val, "%Y-%m-%d").date()
+    return val or None
 
 # ── Medications Router ─────────────────────────────────────────
 medications_router = APIRouter(prefix="/medications", tags=["Medications"])
@@ -142,9 +150,9 @@ async def prescribe_medication(
             "by": str(current_user.user_id), "drug": body.drug_name, "brand": body.brand_name,
             "dosage": body.dosage, "unit": body.dosage_unit, "route": body.route,
             "freq": body.frequency, "freq_code": body.frequency_code,
-            "start": body.start_date, "end": body.end_date,
+            "start": _to_date(body.start_date), "end": _to_date(body.end_date),
             "refills": body.refills_remaining if body.refills_remaining is not None else 0,
-            "refill_date": body.next_refill_date,
+            "refill_date": _to_date(body.next_refill_date),
             "prescriber": body.prescriber_name, "npi": body.prescriber_npi,
             "pharmacy": body.pharmacy_name, "controlled": body.controlled_substance,
             "schedule": body.schedule, "instructions": body.instructions,
@@ -351,8 +359,8 @@ async def create_care_plan(
         {
             "org": str(current_user.organization_id), "patient": str(body.patient_id),
             "by": str(current_user.user_id), "dx": body.primary_diagnosis,
-            "physician": body.ordering_physician, "start": body.start_date,
-            "end": body.end_date, "review": body.review_date,
+            "physician": body.ordering_physician, "start": _to_date(body.start_date),
+            "end": _to_date(body.end_date), "review": _to_date(body.review_date),
             "freq": body.visit_frequency, "duration": body.duration,
             "goals": body.goals, "interventions": body.interventions,
             "outcomes": body.expected_outcomes,
@@ -630,7 +638,7 @@ async def submit_claim(
             "visit": str(body.visit_id) if body.visit_id else None,
             "by": str(current_user.user_id), "claim_no": claim_number,
             "service": body.service_type, "cpt": body.cpt_code,
-            "icd": body.icd10_codes or [], "service_date": body.service_date,
+            "icd": body.icd10_codes or [], "service_date": _to_date(body.service_date),
             "amount": body.amount_billed, "insurer": body.insurance_provider,
             "ins_id": body.insurance_id, "auth": body.prior_auth_number, "notes": body.notes,
         },
@@ -748,7 +756,7 @@ async def create_pharm_order(
             "qty": body.get("quantity"),
             "pharmacy": body.get("pharmacy_name"),
             "ph_phone": body.get("pharmacy_phone"),
-            "delivery": body.get("expected_delivery"),
+            "delivery": _to_date(body.get("expected_delivery")),
             "urgent": body.get("is_urgent", False),
             "notes": body.get("notes"),
         },
@@ -855,7 +863,7 @@ async def create_oasis(
             "patient": str(body.get("patient_id")),
             "by": str(current_user.user_id),
             "type": body.get("assessment_type"),
-            "date": body.get("assessment_date"),
+            "date": _to_date(body.get("assessment_date")),
             "responses": json.dumps(body.get("responses", {})),
             "m1032": str(body.get("m1032_hospitalization_risk")) if body.get("m1032_hospitalization_risk") is not None else None,
             "m1800": str(body.get("m1800_grooming")) if body.get("m1800_grooming") is not None else None,
