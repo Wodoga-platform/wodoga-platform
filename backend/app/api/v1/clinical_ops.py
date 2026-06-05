@@ -246,7 +246,7 @@ async def run_reconciliation(
             INSERT INTO medication_reconciliations (
                 organization_id, patient_id, performed_by,
                 conflicts_found, conflict_details, status
-            ) VALUES (:org, :patient, :by, :found, :details::jsonb, 'pending_review')
+            ) VALUES (:org, :patient, :by, :found, CAST(:details AS jsonb), 'pending_review')
             RETURNING id, performed_at
         """),
         {
@@ -504,7 +504,7 @@ async def advance_referral(
             {
                 "org": str(current_user.organization_id),
                 "fn": ref["first_name"], "ln": ref["last_name"],
-                "dob": ref["date_of_birth"],
+                "dob": _to_date(ref["date_of_birth"]) or date(1900, 1, 1),
                 "phone": ref["phone"], "email": ref["email"],
                 "insurance": json.dumps({"provider": ref["insurance_provider"] or "", "member_id": ref["insurance_id"] or ""}),
                 "notes": f"Admitted via referral from {ref['referral_source'] or 'unknown'}",
@@ -628,7 +628,7 @@ async def submit_claim(
                 prior_auth_number, notes, status, submitted_at
             ) VALUES (
                 :org, :patient, :visit, :by,
-                :claim_no, :service, :cpt, :icd::text[],
+                :claim_no, :service, :cpt, CAST(:icd AS text[]),
                 :service_date, :amount, :insurer, :ins_id,
                 :auth, :notes, 'submitted', NOW()
             ) RETURNING id, claim_number, created_at
@@ -854,7 +854,7 @@ async def create_oasis(
                 clinical_notes, status
             ) VALUES (
                 :org, :patient, :by,
-                :type, :date, :responses::jsonb,
+                :type, :date, CAST(:responses AS jsonb),
                 :m1032, :m1800, :m2020, :notes, 'submitted'
             ) RETURNING id, assessment_type, assessment_date
         """),
@@ -1217,10 +1217,10 @@ async def list_audit_logs(
         conditions.append("al.patient_id = :patient_id")
         params["patient_id"] = str(patient_id)
     if date_from:
-        conditions.append("al.created_at >= :date_from::timestamptz")
+        conditions.append("al.created_at >= CAST(:date_from AS timestamptz)")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("al.created_at <= :date_to::timestamptz")
+        conditions.append("al.created_at <= CAST(:date_to AS timestamptz)")
         params["date_to"] = date_to
 
     where = (" AND ".join(conditions)) if conditions else "TRUE"
