@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -14,8 +15,8 @@ import {
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, visitService, medicationService } from '@/services';
 import {
-  fmtDate, fmtTime, calcAge, cn, PATIENT_STATUS_BADGE,
-  FALL_RISK_BADGE, truncate, VISIT_TYPE_LABEL
+  fmtDate, calcAge, cn, PATIENT_STATUS_BADGE,
+  FALL_RISK_BADGE, truncate,
 } from '@/utils';
 import type { Patient } from '@/types';
 
@@ -47,6 +48,7 @@ type PatientForm = z.infer<typeof patientSchema>;
 // ════════════════════════════════════════════════════════════
 export default function PatientsPage() {
   const qc = useQueryClient();
+  const router = useRouter();
 
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -99,7 +101,6 @@ export default function PatientsPage() {
     createMutation.mutate({
       ...rest,
       email:     rest.email || undefined,
-      blood_type: rest.blood_type as any,
       allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
       insurance_primary: insurance_provider
         ? { provider: insurance_provider, member_id: insurance_member_id || '' }
@@ -188,8 +189,8 @@ export default function PatientsPage() {
                       return (
                         <tr
                           key={p.id}
-                          onClick={() => { setSelected(p); setDetailTab('info'); }}
-                          className={cn(isActive && 'bg-forest-ghost/40')}
+                          onClick={() => router.push(`/patients/${p.id}`)}
+                          className={cn(isActive && 'bg-forest-ghost/40', 'cursor-pointer')}
                         >
                           <td>
                             <div className="flex items-center gap-2.5">
@@ -365,7 +366,7 @@ export default function PatientsPage() {
                           <div className="mt-1.5 w-2.5 h-2.5 rounded-full border-2 border-forest bg-white flex-shrink-0" />
                           <div className="flex-1">
                             <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold">{v.visit_type.replace(/_/g, ' ')}</span>
+                              <span className="text-sm font-semibold">{VISIT_TYPE_LABEL[v.visit_type]}</span>
                               <Badge variant={v.status === 'completed' ? 'green' : v.status === 'scheduled' ? 'blue' : 'gray'}>
                                 {v.status}
                               </Badge>
@@ -511,4 +512,6 @@ export default function PatientsPage() {
   );
 }
 
-
+// Import used in detail panel
+import { fmtTime, VISIT_TYPE_LABEL as VTL } from '@/utils';
+const VISIT_TYPE_LABEL = VTL;
