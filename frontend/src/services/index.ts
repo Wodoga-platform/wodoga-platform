@@ -59,6 +59,12 @@ export const patientService = {
   summary: (id: string) =>
     apiClient.get<{ data: PatientSummary }>(`/patients/${id}/summary`).then(r => r.data.data),
 
+  chart: (id: string) =>
+    apiClient.get<{ data: any }>(`/patients/${id}/chart`).then(r => r.data.data),
+
+  timeline: (id: string) =>
+    apiClient.get<{ data: any[] }>(`/patients/${id}/timeline`).then(r => r.data.data),
+
   create: (body: Partial<Patient>) =>
     apiClient.post<{ data: Patient }>('/patients', body).then(r => r.data.data),
 
