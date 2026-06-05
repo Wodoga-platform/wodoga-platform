@@ -217,10 +217,10 @@ async def patient_vitals_history(
     params: dict = {"patient_id": str(patient_id), "limit": limit}
 
     if date_from:
-        conditions.append("recorded_at >= :date_from::timestamptz")
+        conditions.append("recorded_at >= CAST(:date_from AS timestamptz)")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("recorded_at <= :date_to::timestamptz")
+        conditions.append("recorded_at <= CAST(:date_to AS timestamptz)")
         params["date_to"] = date_to
 
     where = " AND ".join(conditions)
