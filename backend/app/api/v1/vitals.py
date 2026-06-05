@@ -9,7 +9,6 @@ GET  /api/v1/vitals/alerts            All flagged vitals across the organization
 
 from typing import Optional
 from uuid import UUID
-from datetime import datetime, date, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
@@ -117,7 +116,7 @@ async def record_vitals(
                 notes
             ) VALUES (
                 :org, :patient, :visit, :recorded_by,
-                COALESCE(:recorded_at::timestamptz, NOW()),
+                NOW(),
                 :bp_sys, :bp_dia, :bp_pos,
                 :hr, :rhythm,
                 :o2, :o2_delivery,
@@ -138,7 +137,6 @@ async def record_vitals(
             "patient":       str(body.patient_id),
             "visit":         str(body.visit_id) if body.visit_id else None,
             "recorded_by":   str(current_user.user_id),
-            "recorded_at": datetime.fromisoformat(body.recorded_at) if isinstance(body.recorded_at, str) and body.recorded_at else datetime.now(timezone.utc),
             "bp_sys":        body.bp_systolic,
             "bp_dia":        body.bp_diastolic,
             "bp_pos":        body.bp_position,
@@ -282,7 +280,7 @@ async def vitals_alerts(
               )
             ORDER BY v.recorded_at DESC
         """),
-        {"days": str(days)},
+        {"days": days},
     )
     return {"data": [dict(r) for r in result.mappings().all()]}
 
