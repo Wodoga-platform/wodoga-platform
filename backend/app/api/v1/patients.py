@@ -9,7 +9,6 @@ GET    /api/v1/patients/{id}/summary Full patient summary (all linked records)
 """
 
 from typing import Optional
-from datetime import datetime, date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -280,8 +279,8 @@ async def create_patient(
             "org_id":            str(current_user.organization_id),
             "first_name":        body.first_name,
             "last_name":         body.last_name,
-            "dob": datetime.strptime(body.date_of_birth, '%Y-%m-%d').date() if isinstance(body.date_of_birth, str) else body.date_of_birth,
-            "gender": body.gender.lower().replace('-', '_') if body.gender else None,
+            "dob":               body.date_of_birth,
+            "gender":            body.gender,
             "phone":             body.phone,
             "email":             body.email,
             "addr1":             body.address_line1,
@@ -289,7 +288,7 @@ async def create_patient(
             "city":              body.city,
             "state":             body.state,
             "zip":               body.zip,
-            "blood": body.blood_type or None,
+            "blood":             body.blood_type,
             "dx":                body.primary_diagnosis,
             "secondary_dx":      body.secondary_diagnoses or [],
             "allergies":         body.allergies or [],
@@ -299,7 +298,7 @@ async def create_patient(
             "insurance_secondary": json.dumps(body.insurance_secondary) if body.insurance_secondary else None,
             "caregiver":         str(body.assigned_caregiver) if body.assigned_caregiver else None,
             "provider":          str(body.assigned_provider) if body.assigned_provider else None,
-            "fall_risk": body.fall_risk or None,
+            "fall_risk":         body.fall_risk,
             "notes":             body.notes,
         },
     )
@@ -531,3 +530,139 @@ async def get_patient_summary(
             "billing":       dict(billing_summary),
         }
     }
+
+
+@router.get(
+    "/{patient_id}/chart",
+    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
+)
+async def get_patient_chart(
+    patient_id: UUID,
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """
+    Returns the COMPLETE patient chart — full history of every linked record:
+    all visits with SOAP notes, all vitals, all medications, all OASIS
+    assessments, all claims, all care plans, and all pharmacy orders.
+    This is the comprehensive patient file.
+    """
+    patient_result = await db.execute(
+        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
+        {"id": str(patient_id)},
+    )
+    patient = patient_result.mappings().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    # Full visit history (with SOAP notes), most recent first
+    visits_result = await db.execute(
+        text("""
+            SELECT v.*, CONCAT(u.first_name, ' ', u.last_name) AS caregiver_name
+            FROM visits v
+            LEFT JOIN users u ON u.id = v.caregiver_id
+            WHERE v.patient_id = :id
+            ORDER BY v.visit_date DESC, v.visit_time DESC
+        """),
+        {"id": str(patient_id)},
+    )
+    visits = [dict(r) for r in visits_result.mappings().all()]
+
+    # Full vitals history
+    vitals_result = await db.execute(
+        text("SELECT * FROM vitals WHERE patient_id = :id ORDER BY recorded_at DESC"),
+        {"id": str(patient_id)},
+    )
+    vitals = [dict(r) for r in vitals_result.mappings().all()]
+
+    # All medications (active and discontinued)
+    meds_result = await db.execute(
+        text("SELECT * FROM medications WHERE patient_id = :id ORDER BY status, drug_name"),
+        {"id": str(patient_id)},
+    )
+    medications = [dict(r) for r in meds_result.mappings().all()]
+
+    # All pharmacy orders (delivery status)
+    pharm_result = await db.execute(
+        text("SELECT * FROM pharmaceutical_orders WHERE patient_id = :id ORDER BY created_at DESC"),
+        {"id": str(patient_id)},
+    )
+    pharm_orders = [dict(r) for r in pharm_result.mappings().all()]
+
+    # All OASIS assessments
+    oasis_result = await db.execute(
+        text("""
+            SELECT oa.*, CONCAT(u.first_name, ' ', u.last_name) AS conducted_by_name
+            FROM oasis_assessments oa
+            LEFT JOIN users u ON u.id = oa.conducted_by
+            WHERE oa.patient_id = :id
+            ORDER BY oa.assessment_date DESC
+        """),
+        {"id": str(patient_id)},
+    )
+    oasis = [dict(r) for r in oasis_result.mappings().all()]
+
+    # All care plans
+    care_plans_result = await db.execute(
+        text("SELECT * FROM care_plans WHERE patient_id = :id ORDER BY start_date DESC"),
+        {"id": str(patient_id)},
+    )
+    care_plans = [dict(r) for r in care_plans_result.mappings().all()]
+
+    # All claims
+    claims_result = await db.execute(
+        text("SELECT * FROM billing_claims WHERE patient_id = :id ORDER BY service_date DESC"),
+        {"id": str(patient_id)},
+    )
+    claims = [dict(r) for r in claims_result.mappings().all()]
+
+    await audit.log(
+        AuditAction.PATIENT_VIEWED,
+        f"Opened full chart: {patient['first_name']} {patient['last_name']}",
+        patient_id=patient_id, resource_type="patient", resource_id=patient_id,
+    )
+
+    return {
+        "data": {
+            "patient":      dict(patient),
+            "visits":       visits,
+            "vitals":       vitals,
+            "medications":  medications,
+            "pharm_orders": pharm_orders,
+            "oasis":        oasis,
+            "care_plans":   care_plans,
+            "claims":       claims,
+        }
+    }
+
+
+@router.get(
+    "/{patient_id}/timeline",
+    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
+)
+async def get_patient_timeline(
+    patient_id: UUID,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db_for_tenant),
+):
+    """
+    Returns a chronological history feed for a patient, built from the audit
+    trail — every recorded action (discharge, claim filed, medication
+    delivered, SOAP note, OASIS submitted, etc.) tied to this patient.
+    """
+    result = await db.execute(
+        text("""
+            SELECT action, description, user_name, user_role,
+                   resource_type, created_at, success
+            FROM audit_logs
+            WHERE patient_id = :id
+              AND action NOT IN ('PATIENT_VIEWED', 'VITALS_VIEWED',
+                                 'MEDICATION_VIEWED', 'CARE_PLAN_VIEWED',
+                                 'DOCUMENT_VIEWED', 'INTAKE_FORM_VIEWED')
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """),
+        {"id": str(patient_id), "limit": limit},
+    )
+    events = [dict(r) for r in result.mappings().all()]
+    return {"data": events}
