@@ -162,6 +162,9 @@ export const carePlanService = {
 
   create: (body: Partial<CarePlan> & { patient_id: string }) =>
     apiClient.post<{ data: CarePlan }>('/care-plans', body).then(r => r.data.data),
+
+  update: (id: string, body: Record<string, any>) =>
+    apiClient.patch<{ data: CarePlan }>(`/care-plans/${id}`, body).then(r => r.data.data),
 };
 
 // ════════════════════════════════════════════════════════════
@@ -233,6 +236,9 @@ export const pharmService = {
 
   advance: (id: string) =>
     apiClient.post<{ data: { stage: string } }>(`/pharm-orders/${id}/advance`).then(r => r.data),
+
+  update: (id: string, body: Record<string, any>) =>
+    apiClient.patch<{ data: PharmOrder }>(`/pharm-orders/${id}`, body).then(r => r.data.data),
 };
 
 // ════════════════════════════════════════════════════════════
