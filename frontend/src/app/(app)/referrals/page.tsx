@@ -101,6 +101,7 @@ export default function ReferralsPage() {
           <div className="grid grid-cols-2 gap-3">
             <div><label className="form-label">First Name *</label><input className="form-input" {...register('first_name', { required: true })} /></div>
             <div><label className="form-label">Last Name *</label><input className="form-input" {...register('last_name', { required: true })} /></div>
+            <div><label className="form-label">Date of Birth</label><input type="date" className="form-input" {...register('date_of_birth')} /></div>
             <div><label className="form-label">Referral Source</label><input className="form-input" placeholder="Hospital, Physician..." {...register('referral_source')} /></div>
             <div><label className="form-label">Phone</label><input className="form-input" {...register('phone')} /></div>
             <div><label className="form-label">Diagnosis</label><input className="form-input" {...register('diagnosis')} /></div>
