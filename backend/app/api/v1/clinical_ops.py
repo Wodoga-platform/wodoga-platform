@@ -375,9 +375,64 @@ async def create_care_plan(
     return {"data": dict(cp), "message": "Care plan created."}
 
 
-# ════════════════════════════════════════════════════════════════
-# REFERRALS
-# ════════════════════════════════════════════════════════════════
+@care_plans_router.patch(
+    "/{care_plan_id}",
+    dependencies=[Depends(require_permissions(Permission.CARE_PLANS_CREATE))],
+)
+async def update_care_plan(
+    care_plan_id: UUID,
+    body: dict,
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """Edit an existing care plan. Accepts any subset of editable fields."""
+    existing = await db.execute(
+        text("SELECT * FROM care_plans WHERE id = :id"), {"id": str(care_plan_id)}
+    )
+    plan = existing.mappings().first()
+    if not plan:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    # Map incoming field names to columns; date fields get converted
+    editable = {
+        "primary_diagnosis": "primary_diagnosis",
+        "ordering_physician": "ordering_physician",
+        "visit_frequency": "visit_frequency",
+        "duration": "duration",
+        "goals": "goals",
+        "interventions": "interventions",
+        "expected_outcomes": "expected_outcomes",
+        "status": "status",
+        "start_date": "start_date",
+        "end_date": "end_date",
+        "review_date": "review_date",
+    }
+    date_fields = {"start_date", "end_date", "review_date"}
+
+    set_clauses = []
+    params = {"id": str(care_plan_id)}
+    for field, col in editable.items():
+        if field in body:
+            val = _to_date(body[field]) if field in date_fields else body[field]
+            set_clauses.append(f"{col} = :{col}")
+            params[col] = val
+
+    if not set_clauses:
+        return {"data": dict(plan), "message": "No changes."}
+
+    result = await db.execute(
+        text(f"UPDATE care_plans SET {', '.join(set_clauses)}, updated_at = NOW() "
+             f"WHERE id = :id RETURNING *"),
+        params,
+    )
+    updated = result.mappings().first()
+    await audit.log(
+        AuditAction.CARE_PLAN_UPDATED,
+        f"Care plan updated — {updated['primary_diagnosis']}",
+        patient_id=updated["patient_id"], resource_type="care_plan", resource_id=care_plan_id,
+    )
+    return {"data": dict(updated), "message": "Care plan updated."}
 referrals_router = APIRouter(prefix="/referrals", tags=["Referrals"])
 
 
@@ -446,7 +501,7 @@ async def create_referral(
         """),
         {
             "org": str(current_user.organization_id), "by": str(current_user.user_id),
-            "fn": body.first_name, "ln": body.last_name, "dob": body.date_of_birth,
+            "fn": body.first_name, "ln": body.last_name, "dob": _to_date(body.date_of_birth),
             "phone": body.phone, "email": body.email, "source": body.referral_source,
             "physician": body.referring_physician, "dx": body.diagnosis,
             "insurer": body.insurance_provider, "ins_id": body.insurance_id,
@@ -705,8 +760,29 @@ PHARM_STAGES = ["prescribed", "verified", "dispensed", "in_transit", "delivered"
 @pharm_router.get("", dependencies=[Depends(require_permissions(Permission.PHARM_VIEW))])
 async def list_pharm_orders(
     stage: Optional[str] = Query(None),
+    current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
 ):
+    # Auto-progress orders based on elapsed time since creation, so pharmacists
+    # never have to manually advance them. Orders that are delivered or
+    # cancelled are left untouched; everything else moves forward only.
+    await db.execute(
+        text("""
+            UPDATE pharmaceutical_orders
+            SET stage = CASE
+                    WHEN NOW() - created_at >= INTERVAL '24 hours' THEN 'delivered'
+                    WHEN NOW() - created_at >= INTERVAL '8 hours'  THEN 'in_transit'
+                    WHEN NOW() - created_at >= INTERVAL '3 hours'  THEN 'dispensed'
+                    WHEN NOW() - created_at >= INTERVAL '1 hour'   THEN 'verified'
+                    ELSE 'prescribed'
+                END,
+                updated_at = NOW()
+            WHERE organization_id = :org
+              AND stage NOT IN ('delivered', 'cancelled')
+        """),
+        {"org": str(current_user.organization_id)},
+    )
+
     params = {}
     where = "po.stage = :stage" if stage else "po.stage != 'cancelled'"
     if stage:
@@ -768,6 +844,62 @@ async def create_pharm_order(
         resource_type="pharm_order", resource_id=order["id"],
     )
     return {"data": dict(order), "message": "Order placed."}
+
+
+@pharm_router.patch(
+    "/{order_id}",
+    dependencies=[Depends(require_permissions(Permission.PHARM_CREATE))],
+)
+async def update_pharm_order(
+    order_id: UUID,
+    body: dict,
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """Edit an existing pharmacy order (drug, quantity, pharmacy, notes, etc.)."""
+    existing = await db.execute(
+        text("SELECT * FROM pharmaceutical_orders WHERE id = :id"), {"id": str(order_id)}
+    )
+    order = existing.mappings().first()
+    if not order:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    editable = {
+        "drug_name": "drug_name",
+        "quantity": "quantity",
+        "pharmacy_name": "pharmacy_name",
+        "pharmacy_phone": "pharmacy_phone",
+        "is_urgent": "is_urgent",
+        "notes": "notes",
+        "stage": "stage",
+        "expected_delivery": "expected_delivery",
+    }
+    date_fields = {"expected_delivery"}
+
+    set_clauses = []
+    params = {"id": str(order_id)}
+    for field, col in editable.items():
+        if field in body:
+            val = _to_date(body[field]) if field in date_fields else body[field]
+            set_clauses.append(f"{col} = :{col}")
+            params[col] = val
+
+    if not set_clauses:
+        return {"data": dict(order), "message": "No changes."}
+
+    result = await db.execute(
+        text(f"UPDATE pharmaceutical_orders SET {', '.join(set_clauses)}, updated_at = NOW() "
+             f"WHERE id = :id RETURNING *"),
+        params,
+    )
+    updated = result.mappings().first()
+    await audit.log(
+        AuditAction.PHARM_ORDER_ADVANCED,
+        f"Pharm order edited: {updated['drug_name']}",
+        resource_type="pharm_order", resource_id=order_id,
+    )
+    return {"data": dict(updated), "message": "Order updated."}
 
 
 @pharm_router.post(
