@@ -121,7 +121,7 @@ async def check_eligibility(
             "insurer":      body.insurance_provider,
             "member":       body.member_id,
             "group":        body.group_id,
-            "service_date": datetime.strptime(body.service_date, '%Y-%m-%d').date() if body.service_date else None,
+            "service_date": body.service_date,
             "result":       result_data.get("result", "error"),
             "active":       result_data.get("coverage_active", False),
             "details":      json.dumps(result_data.get("coverage_details", {})),
@@ -176,12 +176,13 @@ async def eligibility_history(
     params = {"limit": limit}
     where = ""
     if patient_id:
-        where = "WHERE patient_id = :patient_id"
+        where = "WHERE ec.patient_id = :patient_id"
         params["patient_id"] = str(patient_id)
 
     result = await db.execute(
         text(f"""
-            SELECT ec.*, p.first_name, p.last_name
+            SELECT ec.*,
+                   CONCAT(p.first_name, ' ', p.last_name) AS patient_name
             FROM insurance_eligibility_checks ec
             LEFT JOIN patients p ON p.id = ec.patient_id
             {where}
@@ -273,8 +274,8 @@ async def add_provider_contract(
             "plan_name":  body.get("plan_name", ""),
             "plan_type":  body.get("plan_type"),
             "payer_id":   body.get("payer_id"),
-            "start": datetime.strptime(body.get("contract_start"), '%Y-%m-%d').date() if body.get("contract_start") else None,
-            "end":   datetime.strptime(body.get("contract_end"), '%Y-%m-%d').date() if body.get("contract_end") else None,
+            "start":      body.get("contract_start"),
+            "end":        body.get("contract_end"),
             "accepting":  body.get("is_accepting_new", True),
             "notes":      body.get("notes"),
         },
