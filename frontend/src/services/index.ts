@@ -65,6 +65,16 @@ export const patientService = {
   timeline: (id: string) =>
     apiClient.get<{ data: any[] }>(`/patients/${id}/timeline`).then(r => r.data.data),
 
+  mapLocations: (caregiverId?: string) =>
+    apiClient.get<{ data: any[] }>('/patients/map/locations', {
+      params: caregiverId ? { caregiver_id: caregiverId } : {},
+    }).then(r => r.data.data),
+
+  backfillGeocode: () =>
+    apiClient.post<{ data: { checked: number; geocoded: number }; message: string }>(
+      '/patients/map/backfill-geocode',
+    ).then(r => r.data),
+
   create: (body: Partial<Patient>) =>
     apiClient.post<{ data: Patient }>('/patients', body).then(r => r.data.data),
 
@@ -331,4 +341,33 @@ export const portalService = {
   myDocuments: () => apiClient.get('/portal/me/documents').then(r => r.data.data),
   sendMessage: (body: { subject: string; body: string }) =>
     apiClient.post('/portal/me/messages', body).then(r => r.data.data),
+};
+
+// ════════════════════════════════════════════════════════════
+// DOCUMENTS & IMAGES
+// ════════════════════════════════════════════════════════════
+export const documentService = {
+  storageStatus: () =>
+    apiClient.get<{ data: { configured: boolean } }>('/documents/storage-status').then(r => r.data.data),
+
+  listForPatient: (patientId: string) =>
+    apiClient.get<{ data: any[] }>(`/documents/patient/${patientId}`).then(r => r.data.data),
+
+  upload: (patientId: string, file: File, documentType: string, description: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('document_type', documentType);
+    form.append('description', description);
+    return apiClient.post<{ data: any }>(`/documents/patient/${patientId}`, form, {
+      headers: { 'Content-Type': undefined as any },
+    }).then(r => r.data.data);
+  },
+
+  getViewUrl: (documentId: string) =>
+    apiClient.get<{ data: { url: string; file_name: string; mime_type: string } }>(
+      `/documents/${documentId}/url`,
+    ).then(r => r.data.data),
+
+  remove: (documentId: string) =>
+    apiClient.delete(`/documents/${documentId}`).then(r => r.data),
 };
