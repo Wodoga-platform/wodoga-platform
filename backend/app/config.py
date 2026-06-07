@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     azure_storage_container_signatures: str = "signatures"
     azure_storage_sas_token_expiry_hours: int = 2
 
+    # ── Azure Maps (geocoding) ──────────────────────────────
+    azure_maps_key: str = ""
+
     # ── Insurance Eligibility ────────────────────────────────
     eligibility_provider: Literal["waystar", "availity", "simulated"] = "simulated"
     waystar_api_url: str = ""
