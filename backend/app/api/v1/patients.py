@@ -304,6 +304,16 @@ async def create_patient(
     )
     new_patient = result.mappings().first()
 
+    # Geocode the address once and cache coordinates (best-effort)
+    from app.core.geocoding import build_address_string, geocode_address
+    addr = build_address_string(body.address_line1, body.city, body.state, body.zip)
+    coords = await geocode_address(addr)
+    if coords:
+        await db.execute(
+            text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
+            {"lat": coords[0], "lon": coords[1], "id": str(new_patient["id"])},
+        )
+
     await audit.log(
         AuditAction.PATIENT_CREATED,
         f"Created patient record: {body.first_name} {body.last_name}",
@@ -385,6 +395,23 @@ async def update_patient(
         text(f"UPDATE patients SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
         params,
     )
+
+    # If any address field changed, re-geocode and refresh cached coordinates
+    address_fields = {"address_line1", "city", "state", "zip"}
+    if address_fields & set(updates.keys()):
+        from app.core.geocoding import build_address_string, geocode_address
+        addr = build_address_string(
+            updates.get("address_line1", existing["address_line1"]),
+            updates.get("city", existing["city"]),
+            updates.get("state", existing["state"]),
+            updates.get("zip", existing["zip"]),
+        )
+        coords = await geocode_address(addr)
+        if coords:
+            await db.execute(
+                text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
+                {"lat": coords[0], "lon": coords[1], "id": str(patient_id)},
+            )
 
     await audit.log(
         AuditAction.PATIENT_UPDATED,
@@ -666,3 +693,83 @@ async def get_patient_timeline(
     )
     events = [dict(r) for r in result.mappings().all()]
     return {"data": events}
+
+
+@router.get(
+    "/map/locations",
+    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
+)
+async def get_patient_map_locations(
+    caregiver_id: Optional[UUID] = Query(None, description="Filter to one caregiver's patients"),
+    db: AsyncSession = Depends(get_db_for_tenant),
+):
+    """
+    Returns active patients that have geocoded coordinates, for the map view.
+    Optionally filtered to a single caregiver's assigned patients.
+    """
+    conditions = ["p.deleted_at IS NULL", "p.status = 'active'",
+                  "p.latitude IS NOT NULL", "p.longitude IS NOT NULL"]
+    params = {}
+    if caregiver_id:
+        conditions.append("p.assigned_caregiver = :cg")
+        params["cg"] = str(caregiver_id)
+
+    result = await db.execute(
+        text(f"""
+            SELECT p.id, p.first_name, p.last_name, p.latitude, p.longitude,
+                   p.address_line1, p.city, p.state, p.zip,
+                   p.primary_diagnosis, p.phone,
+                   CONCAT(c.first_name, ' ', c.last_name) AS caregiver_name
+            FROM patients p
+            LEFT JOIN users c ON c.id = p.assigned_caregiver
+            WHERE {' AND '.join(conditions)}
+            ORDER BY p.last_name
+        """),
+        params,
+    )
+    return {"data": [dict(r) for r in result.mappings().all()]}
+
+
+@router.post(
+    "/map/backfill-geocode",
+    dependencies=[Depends(require_permissions(Permission.PATIENTS_EDIT))],
+)
+async def backfill_geocode(
+    db: AsyncSession = Depends(get_db_for_tenant),
+):
+    """
+    One-time helper: geocode any active patients that have an address but no
+    coordinates yet. Safe to run repeatedly; only fills in what's missing.
+    """
+    from app.core.geocoding import build_address_string, geocode_address, is_geocoding_configured
+    if not is_geocoding_configured():
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "geocoding_not_configured",
+                    "message": "Add AZURE_MAPS_KEY to enable geocoding."},
+        )
+
+    result = await db.execute(
+        text("""
+            SELECT id, address_line1, city, state, zip
+            FROM patients
+            WHERE deleted_at IS NULL AND status = 'active'
+              AND (latitude IS NULL OR longitude IS NULL)
+              AND address_line1 IS NOT NULL
+            LIMIT 200
+        """),
+    )
+    rows = result.mappings().all()
+    updated = 0
+    for r in rows:
+        addr = build_address_string(r["address_line1"], r["city"], r["state"], r["zip"])
+        coords = await geocode_address(addr)
+        if coords:
+            await db.execute(
+                text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
+                {"lat": coords[0], "lon": coords[1], "id": str(r["id"])},
+            )
+            updated += 1
+
+    return {"data": {"checked": len(rows), "geocoded": updated},
+            "message": f"Geocoded {updated} of {len(rows)} patients."}
