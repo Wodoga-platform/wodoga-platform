@@ -101,6 +101,9 @@ export const visitService = {
   get: (id: string) =>
     apiClient.get<{ data: Visit }>(`/visits/${id}`).then(r => r.data.data),
 
+  overdue: () =>
+    apiClient.get<{ data: any[] }>('/visits/overdue').then(r => r.data.data),
+
   create: (body: {
     patient_id: string; caregiver_id?: string; visit_date: string;
     visit_time?: string; visit_type: string; notes?: string;
