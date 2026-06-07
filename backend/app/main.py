@@ -50,6 +50,9 @@ async def lifespan(app: FastAPI):
             await conn.execute(_text(
                 "ALTER TABLE patients ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION"
             ))
+            await conn.execute(_text(
+                "ALTER TABLE visits ADD COLUMN IF NOT EXISTS overdue_alerted BOOLEAN DEFAULT FALSE"
+            ))
         print("[Wodoga] Schema check complete (patient geo columns ensured).")
     except Exception as e:
         print(f"[Wodoga] Schema check warning: {e}")
