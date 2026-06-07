@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Users, Home, ClipboardList, HeartPulse,
   Pill, RefreshCcw, Factory, GitMerge, CreditCard,
-  CheckCircle, MessageSquare, FileText, Search,
+  CheckCircle, MessageSquare, FileText, Search, MapPin,
   LogOut, Bell, ChevronDown, User, Shield, Lock,
 } from 'lucide-react';
 import { cn, ROLE_DISPLAY } from '@/utils';
@@ -32,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   // Clinical
   { section: 'Clinical', label: 'Patients',    href: '/patients',   icon: <Users size={15} />,         permission: 'patients:view' },
   { section: 'Clinical', label: 'Home Visits', href: '/visits',     icon: <Home size={15} />,          permission: 'visits:view'   },
+  { section: 'Clinical', label: 'Patient Map', href: '/map',        icon: <MapPin size={15} />,        permission: 'patients:view' },
   { section: 'Clinical', label: 'Care Plans',  href: '/care-plans', icon: <ClipboardList size={15} />, permission: 'care_plans:view' },
   { section: 'Clinical', label: 'Vitals',      href: '/vitals',     icon: <HeartPulse size={15} />,    permission: 'vitals:view'   },
   // Pharmacy
