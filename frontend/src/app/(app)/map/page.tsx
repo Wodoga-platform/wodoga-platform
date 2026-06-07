@@ -1,775 +1,173 @@
-"""
-Wodoga Platform — Patients API
-GET    /api/v1/patients              List all patients (paginated, filterable)
-POST   /api/v1/patients              Create a new patient record
-GET    /api/v1/patients/{id}         Get a single patient's full record
-PATCH  /api/v1/patients/{id}         Update patient information
-DELETE /api/v1/patients/{id}         Soft-delete a patient record
-GET    /api/v1/patients/{id}/summary Full patient summary (all linked records)
-"""
+'use client';
 
-from typing import Optional
-from uuid import UUID
+import { useState, useEffect, useRef } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { MapPin, RefreshCw, Users } from 'lucide-react';
+import { Button, EmptyState, PageLoader } from '@/components/ui';
+import { patientService, staffService } from '@/services';
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.audit import AuditAction, AuditLogger
-from app.core.permissions import Permission, TokenPayload, require_permissions
-from app.dependencies import (
-    get_audit_logger,
-    get_client_ip,
-    get_current_user_payload,
-    get_db_for_tenant,
-)
-
-router = APIRouter(prefix="/patients", tags=["Patients"])
-
-
-# ── Schemas ────────────────────────────────────────────────────
-class PatientCreate(BaseModel):
-    first_name: str
-    last_name: str
-    date_of_birth: str
-    gender: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[EmailStr] = None
-    address_line1: Optional[str] = None
-    address_line2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    blood_type: Optional[str] = None
-    primary_diagnosis: Optional[str] = None
-    secondary_diagnoses: Optional[list[str]] = []
-    allergies: Optional[list[str]] = []
-    medical_history: Optional[str] = None
-    emergency_contact: Optional[dict] = None
-    insurance_primary: Optional[dict] = None
-    insurance_secondary: Optional[dict] = None
-    assigned_caregiver: Optional[UUID] = None
-    assigned_provider: Optional[UUID] = None
-    fall_risk: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class PatientUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    date_of_birth: Optional[str] = None
-    gender: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[EmailStr] = None
-    address_line1: Optional[str] = None
-    address_line2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    blood_type: Optional[str] = None
-    primary_diagnosis: Optional[str] = None
-    secondary_diagnoses: Optional[list[str]] = None
-    allergies: Optional[list[str]] = None
-    medical_history: Optional[str] = None
-    emergency_contact: Optional[dict] = None
-    insurance_primary: Optional[dict] = None
-    insurance_secondary: Optional[dict] = None
-    assigned_caregiver: Optional[UUID] = None
-    assigned_provider: Optional[UUID] = None
-    fall_risk: Optional[str] = None
-    status: Optional[str] = None
-    notes: Optional[str] = None
-
-
-# ── List Patients ─────────────────────────────────────────────
-@router.get(
-    "",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def list_patients(
-    request: Request,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(25, ge=1, le=100),
-    search: Optional[str] = Query(None, description="Search by name, diagnosis, or MRN"),
-    status: Optional[str] = Query(None),
-    caregiver_id: Optional[UUID] = Query(None),
-    provider_id: Optional[UUID] = Query(None),
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns a paginated list of patients for the current organization.
-    RLS ensures only this organization's patients are ever returned.
-    Supports search, status filter, and caregiver/provider filter.
-    """
-    offset = (page - 1) * per_page
-
-    # Build the WHERE clause dynamically
-    conditions = ["p.deleted_at IS NULL"]
-    params: dict = {"limit": per_page, "offset": offset}
-
-    if search:
-        conditions.append(
-            "(p.first_name ILIKE :search OR p.last_name ILIKE :search "
-            "OR p.primary_diagnosis ILIKE :search OR p.mrn ILIKE :search "
-            "OR CONCAT(p.first_name, ' ', p.last_name) ILIKE :search)"
-        )
-        params["search"] = f"%{search}%"
-
-    if status:
-        conditions.append("p.status = :status")
-        params["status"] = status
-
-    if caregiver_id:
-        conditions.append("p.assigned_caregiver = :caregiver_id")
-        params["caregiver_id"] = str(caregiver_id)
-
-    if provider_id:
-        conditions.append("p.assigned_provider = :provider_id")
-        params["provider_id"] = str(provider_id)
-
-    # Caregivers can only see their assigned patients
-    if current_user.role == "caregiver":
-        conditions.append("p.assigned_caregiver = :current_user_id")
-        params["current_user_id"] = str(current_user.user_id)
-
-    where = " AND ".join(conditions)
-
-    result = await db.execute(
-        text(f"""
-            SELECT
-                p.id, p.mrn, p.first_name, p.last_name,
-                p.date_of_birth, p.gender, p.phone, p.email,
-                p.primary_diagnosis, p.status, p.fall_risk,
-                p.insurance_primary,
-                p.assigned_caregiver, p.assigned_provider,
-                p.created_at, p.updated_at,
-                CONCAT(cg.first_name, ' ', cg.last_name) AS caregiver_name,
-                CONCAT(pv.first_name, ' ', pv.last_name) AS provider_name,
-                COUNT(*) OVER() AS total_count
-            FROM patients p
-            LEFT JOIN users cg ON cg.id = p.assigned_caregiver
-            LEFT JOIN users pv ON pv.id = p.assigned_provider
-            WHERE {where}
-            ORDER BY p.last_name ASC, p.first_name ASC
-            LIMIT :limit OFFSET :offset
-        """),
-        params,
-    )
-    rows = result.mappings().all()
-
-    total = rows[0]["total_count"] if rows else 0
-    patients = [dict(row) for row in rows]
-
-    # Strip total_count from individual patient records
-    for p in patients:
-        p.pop("total_count", None)
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Listed patients (page {page}, search: {search or 'none'})",
-    )
-
-    return {
-        "data": patients,
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "pages": -(-total // per_page),  # Ceiling division
-        },
+// Load Leaflet from CDN once (no npm dependency, no SSR issues)
+function loadLeaflet(): Promise<any> {
+  return new Promise((resolve) => {
+    const w = window as any;
+    if (w.L) return resolve(w.L);
+    if (!document.getElementById('leaflet-css')) {
+      const css = document.createElement('link');
+      css.id = 'leaflet-css';
+      css.rel = 'stylesheet';
+      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(css);
     }
-
-
-# ── Get Single Patient ────────────────────────────────────────
-@router.get(
-    "/{patient_id}",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient(
-    patient_id: UUID,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns the full record for a single patient.
-    RLS ensures only patients in the current organization are accessible.
-    Every access to a patient record is logged — HIPAA requirement.
-    """
-    result = await db.execute(
-        text("""
-            SELECT
-                p.*,
-                CONCAT(cg.first_name, ' ', cg.last_name) AS caregiver_name,
-                CONCAT(pv.first_name, ' ', pv.last_name) AS provider_name
-            FROM patients p
-            LEFT JOIN users cg ON cg.id = p.assigned_caregiver
-            LEFT JOIN users pv ON pv.id = p.assigned_provider
-            WHERE p.id = :id AND p.deleted_at IS NULL
-        """),
-        {"id": str(patient_id)},
-    )
-    patient = result.mappings().first()
-
-    if not patient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": "Patient not found."},
-        )
-
-    # Caregivers can only access their assigned patients
-    if (
-        current_user.role == "caregiver"
-        and str(patient["assigned_caregiver"]) != str(current_user.user_id)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "message": "You are not assigned to this patient."},
-        )
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Viewed patient record: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-    )
-
-    return {"data": dict(patient)}
-
-
-# ── Create Patient ────────────────────────────────────────────
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_CREATE))],
-)
-async def create_patient(
-    body: PatientCreate,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """Creates a new patient record for the current organization."""
-    import json
-
-    result = await db.execute(
-        text("""
-            INSERT INTO patients (
-                organization_id, first_name, last_name, date_of_birth,
-                gender, phone, email, address_line1, address_line2,
-                city, state, zip, blood_type, primary_diagnosis,
-                secondary_diagnoses, allergies, medical_history,
-                emergency_contact, insurance_primary, insurance_secondary,
-                assigned_caregiver, assigned_provider, fall_risk, notes
-            ) VALUES (
-                :org_id, :first_name, :last_name, :dob,
-                :gender, :phone, :email, :addr1, :addr2,
-                :city, :state, :zip, :blood, :dx,
-                :secondary_dx, :allergies, :history,
-                :emergency, :insurance_primary, :insurance_secondary,
-                :caregiver, :provider, :fall_risk, :notes
-            )
-            RETURNING id, first_name, last_name, created_at
-        """),
-        {
-            "org_id":            str(current_user.organization_id),
-            "first_name":        body.first_name,
-            "last_name":         body.last_name,
-            "dob":               body.date_of_birth,
-            "gender":            body.gender,
-            "phone":             body.phone,
-            "email":             body.email,
-            "addr1":             body.address_line1,
-            "addr2":             body.address_line2,
-            "city":              body.city,
-            "state":             body.state,
-            "zip":               body.zip,
-            "blood":             body.blood_type,
-            "dx":                body.primary_diagnosis,
-            "secondary_dx":      body.secondary_diagnoses or [],
-            "allergies":         body.allergies or [],
-            "history":           body.medical_history,
-            "emergency":         json.dumps(body.emergency_contact) if body.emergency_contact else None,
-            "insurance_primary": json.dumps(body.insurance_primary) if body.insurance_primary else None,
-            "insurance_secondary": json.dumps(body.insurance_secondary) if body.insurance_secondary else None,
-            "caregiver":         str(body.assigned_caregiver) if body.assigned_caregiver else None,
-            "provider":          str(body.assigned_provider) if body.assigned_provider else None,
-            "fall_risk":         body.fall_risk,
-            "notes":             body.notes,
-        },
-    )
-    new_patient = result.mappings().first()
-
-    # Geocode the address once and cache coordinates (best-effort)
-    from app.core.geocoding import build_address_string, geocode_address
-    addr = build_address_string(body.address_line1, body.city, body.state, body.zip)
-    coords = await geocode_address(addr)
-    if coords:
-        await db.execute(
-            text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-            {"lat": coords[0], "lon": coords[1], "id": str(new_patient["id"])},
-        )
-
-    await audit.log(
-        AuditAction.PATIENT_CREATED,
-        f"Created patient record: {body.first_name} {body.last_name}",
-        patient_id=new_patient["id"],
-        resource_type="patient",
-        resource_id=new_patient["id"],
-        new_state=body.model_dump(),
-    )
-
-    return {"data": dict(new_patient), "message": "Patient record created successfully."}
-
-
-# ── Update Patient ────────────────────────────────────────────
-@router.patch(
-    "/{patient_id}",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_EDIT))],
-)
-async def update_patient(
-    patient_id: UUID,
-    body: PatientUpdate,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Updates one or more fields on a patient record.
-    Only provided fields are updated — others remain unchanged.
-    Both before and after states are captured in the audit log.
-    """
-    import json
-
-    # Fetch current state for audit log
-    result = await db.execute(
-        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    existing = result.mappings().first()
-    if not existing:
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Patient not found."})
-
-    # Build dynamic UPDATE
-    updates = body.model_dump(exclude_none=True)
-    if not updates:
-        return {"data": dict(existing), "message": "No changes provided."}
-
-    set_clauses = []
-    params = {"id": str(patient_id)}
-
-    field_map = {
-        "first_name": "first_name", "last_name": "last_name",
-        "date_of_birth": "date_of_birth", "gender": "gender",
-        "phone": "phone", "email": "email",
-        "address_line1": "address_line1", "address_line2": "address_line2",
-        "city": "city", "state": "state", "zip": "zip",
-        "blood_type": "blood_type", "primary_diagnosis": "primary_diagnosis",
-        "secondary_diagnoses": "secondary_diagnoses", "allergies": "allergies",
-        "medical_history": "medical_history", "fall_risk": "fall_risk",
-        "status": "status", "notes": "notes",
-        "assigned_caregiver": "assigned_caregiver",
-        "assigned_provider": "assigned_provider",
+    const existing = document.getElementById('leaflet-js') as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', () => resolve(w.L));
+      return;
     }
+    const script = document.createElement('script');
+    script.id = 'leaflet-js';
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => resolve(w.L);
+    document.body.appendChild(script);
+  });
+}
 
-    json_fields = {"emergency_contact", "insurance_primary", "insurance_secondary"}
+export default function MapPage() {
+  const [caregiverId, setCaregiverId] = useState('');
+  const mapRef = useRef<any>(null);
+  const markersRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [leafletReady, setLeafletReady] = useState(false);
 
-    for field, value in updates.items():
-        if field in field_map:
-            set_clauses.append(f"{field_map[field]} = :{field}")
-            if field in json_fields and isinstance(value, dict):
-                params[field] = json.dumps(value)
-            elif isinstance(value, UUID):
-                params[field] = str(value)
-            else:
-                params[field] = value
+  const { data: caregivers } = useQuery({
+    queryKey: ['staff', 'caregivers'],
+    queryFn:  () => staffService.list('caregiver'),
+  });
 
-    if not set_clauses:
-        return {"data": dict(existing), "message": "No valid fields to update."}
+  const { data: locations = [], isLoading, refetch } = useQuery({
+    queryKey: ['patient-map', caregiverId],
+    queryFn:  () => patientService.mapLocations(caregiverId || undefined),
+  });
 
-    await db.execute(
-        text(f"UPDATE patients SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
-        params,
-    )
+  const backfillMut = useMutation({
+    mutationFn: () => patientService.backfillGeocode(),
+    onSuccess: (res) => { toast.success(res.message || 'Geocoding complete ✓'); refetch(); },
+    onError: (e: any) => toast.error(e?.response?.data?.detail?.message || 'Geocoding unavailable. Add the Azure Maps key first.'),
+  });
 
-    # If any address field changed, re-geocode and refresh cached coordinates
-    address_fields = {"address_line1", "city", "state", "zip"}
-    if address_fields & set(updates.keys()):
-        from app.core.geocoding import build_address_string, geocode_address
-        addr = build_address_string(
-            updates.get("address_line1", existing["address_line1"]),
-            updates.get("city", existing["city"]),
-            updates.get("state", existing["state"]),
-            updates.get("zip", existing["zip"]),
-        )
-        coords = await geocode_address(addr)
-        if coords:
-            await db.execute(
-                text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-                {"lat": coords[0], "lon": coords[1], "id": str(patient_id)},
-            )
+  // Initialize the Leaflet map once the library and container are ready
+  useEffect(() => {
+    let cancelled = false;
+    loadLeaflet().then((L) => {
+      if (cancelled || !containerRef.current || mapRef.current) return;
+      const map = L.map(containerRef.current).setView([31.0, -97.5], 7); // central Texas default
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19,
+      }).addTo(map);
+      mapRef.current = map;
+      markersRef.current = L.layerGroup().addTo(map);
+      setLeafletReady(true);
+    });
+    return () => {
+      cancelled = true;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+  }, []);
 
-    await audit.log(
-        AuditAction.PATIENT_UPDATED,
-        f"Updated patient: {existing['first_name']} {existing['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-        previous_state=dict(existing),
-        new_state=updates,
-    )
+  // Redraw markers whenever locations change
+  useEffect(() => {
+    const w = window as any;
+    const L = w.L;
+    if (!L || !mapRef.current || !markersRef.current) return;
 
-    return {"message": "Patient record updated successfully."}
+    markersRef.current.clearLayers();
+    const bounds: [number, number][] = [];
 
+    locations.forEach((p: any) => {
+      if (p.latitude == null || p.longitude == null) return;
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="background:#1B4332;width:26px;height:26px;border-radius:50% 50% 50% 0;
+                 transform:rotate(-45deg);border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.3);
+                 display:flex;align-items:center;justify-content:center;">
+                 <div style="width:8px;height:8px;background:white;border-radius:50%;transform:rotate(45deg);"></div>
+               </div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 26],
+        popupAnchor: [0, -26],
+      });
+      const addr = [p.address_line1, p.city, p.state, p.zip].filter(Boolean).join(', ');
+      const marker = L.marker([p.latitude, p.longitude], { icon }).bindPopup(`
+        <div style="font-family:system-ui;min-width:180px;">
+          <div style="font-weight:700;font-size:14px;">${p.first_name} ${p.last_name}</div>
+          ${p.primary_diagnosis ? `<div style="color:#2D6A4F;font-size:12px;margin-top:2px;">${p.primary_diagnosis}</div>` : ''}
+          <div style="color:#4A4845;font-size:12px;margin-top:4px;">${addr}</div>
+          ${p.phone ? `<div style="color:#8A8784;font-size:12px;">${p.phone}</div>` : ''}
+          ${p.caregiver_name ? `<div style="color:#8A8784;font-size:11px;margin-top:4px;">Caregiver: ${p.caregiver_name}</div>` : ''}
+          <a href="/patients/${p.id}" style="color:#1B4332;font-size:12px;font-weight:600;display:inline-block;margin-top:6px;">Open chart →</a>
+        </div>
+      `);
+      markersRef.current.addLayer(marker);
+      bounds.push([p.latitude, p.longitude]);
+    });
 
-# ── Delete Patient (Soft) ─────────────────────────────────────
-@router.delete(
-    "/{patient_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_DELETE))],
-)
-async def delete_patient(
-    patient_id: UUID,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Soft-deletes a patient record by setting deleted_at.
-    The record is preserved in the database for HIPAA compliance.
-    Hard deletion is never performed.
-    """
-    result = await db.execute(
-        text("SELECT first_name, last_name FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    patient = result.mappings().first()
-    if not patient:
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Patient not found."})
-
-    await db.execute(
-        text("UPDATE patients SET deleted_at = NOW() WHERE id = :id"),
-        {"id": str(patient_id)},
-    )
-
-    await audit.log(
-        AuditAction.PATIENT_DELETED,
-        f"Soft-deleted patient: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-    )
-
-
-# ── Patient Summary (All Linked Records) ──────────────────────
-@router.get(
-    "/{patient_id}/summary",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient_summary(
-    patient_id: UUID,
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns a complete summary of a patient including their most recent
-    vitals, active medications, upcoming visits, active care plan,
-    and latest billing status. Used for the patient detail panel.
-    """
-    patient_result = await db.execute(
-        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    patient = patient_result.mappings().first()
-    if not patient:
-        raise HTTPException(status_code=404, detail={"error": "not_found"})
-
-    # Latest vitals
-    vitals_result = await db.execute(
-        text("SELECT * FROM vitals WHERE patient_id = :id ORDER BY recorded_at DESC LIMIT 5"),
-        {"id": str(patient_id)},
-    )
-    vitals = [dict(r) for r in vitals_result.mappings().all()]
-
-    # Active medications
-    meds_result = await db.execute(
-        text("SELECT * FROM medications WHERE patient_id = :id AND status = 'active' ORDER BY drug_name"),
-        {"id": str(patient_id)},
-    )
-    medications = [dict(r) for r in meds_result.mappings().all()]
-
-    # Upcoming visits
-    visits_result = await db.execute(
-        text("""
-            SELECT v.*, CONCAT(u.first_name, ' ', u.last_name) as caregiver_name
-            FROM visits v
-            LEFT JOIN users u ON u.id = v.caregiver_id
-            WHERE v.patient_id = :id AND v.status IN ('scheduled', 'in_progress')
-            ORDER BY v.visit_date ASC, v.visit_time ASC
-            LIMIT 5
-        """),
-        {"id": str(patient_id)},
-    )
-    visits = [dict(r) for r in visits_result.mappings().all()]
-
-    # Active care plan
-    care_plan_result = await db.execute(
-        text("SELECT * FROM care_plans WHERE patient_id = :id AND status = 'active' LIMIT 1"),
-        {"id": str(patient_id)},
-    )
-    care_plan = care_plan_result.mappings().first()
-
-    # Billing summary
-    billing_result = await db.execute(
-        text("""
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
-                COUNT(*) FILTER (WHERE status = 'approved') as approved_count,
-                COUNT(*) FILTER (WHERE status = 'denied') as denied_count,
-                COALESCE(SUM(amount_billed), 0) as total_billed,
-                COALESCE(SUM(amount_paid), 0) as total_paid
-            FROM billing_claims
-            WHERE patient_id = :id
-        """),
-        {"id": str(patient_id)},
-    )
-    billing_summary = billing_result.mappings().first()
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Viewed patient summary: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-    )
-
-    return {
-        "data": {
-            "patient":       dict(patient),
-            "vitals":        vitals,
-            "medications":   medications,
-            "visits":        visits,
-            "care_plan":     dict(care_plan) if care_plan else None,
-            "billing":       dict(billing_summary),
-        }
+    if (bounds.length > 0) {
+      mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 13 });
     }
+  }, [locations, leafletReady]);
 
+  const mappable = locations.filter((p: any) => p.latitude != null && p.longitude != null);
 
-@router.get(
-    "/{patient_id}/chart",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient_chart(
-    patient_id: UUID,
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns the COMPLETE patient chart — full history of every linked record:
-    all visits with SOAP notes, all vitals, all medications, all OASIS
-    assessments, all claims, all care plans, and all pharmacy orders.
-    This is the comprehensive patient file.
-    """
-    patient_result = await db.execute(
-        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    patient = patient_result.mappings().first()
-    if not patient:
-        raise HTTPException(status_code=404, detail={"error": "not_found"})
+  return (
+    <>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="page-title">Patient Map</h1>
+          <p className="page-subtitle">Plan caregiver routes by seeing every patient's home on the map</p>
+        </div>
+        <Button variant="secondary" size="sm" icon={<RefreshCw size={13} />}
+          loading={backfillMut.isPending}
+          onClick={() => backfillMut.mutate()}>
+          Geocode Existing Patients
+        </Button>
+      </div>
 
-    # Full visit history (with SOAP notes), most recent first
-    visits_result = await db.execute(
-        text("""
-            SELECT v.*, CONCAT(u.first_name, ' ', u.last_name) AS caregiver_name
-            FROM visits v
-            LEFT JOIN users u ON u.id = v.caregiver_id
-            WHERE v.patient_id = :id
-            ORDER BY v.visit_date DESC, v.visit_time DESC
-        """),
-        {"id": str(patient_id)},
-    )
-    visits = [dict(r) for r in visits_result.mappings().all()]
+      {/* Filter bar */}
+      <div className="card p-3 mb-4">
+        <div className="flex items-center gap-3">
+          <Users size={15} className="text-ink-3" />
+          <select className="form-select w-auto" value={caregiverId} onChange={e => setCaregiverId(e.target.value)}>
+            <option value="">All caregivers</option>
+            {caregivers?.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
+          </select>
+          <span className="text-sm text-ink-3">
+            <MapPin size={12} className="inline mr-1" />
+            {mappable.length} patient{mappable.length === 1 ? '' : 's'} mapped
+          </span>
+        </div>
+      </div>
 
-    # Full vitals history
-    vitals_result = await db.execute(
-        text("SELECT * FROM vitals WHERE patient_id = :id ORDER BY recorded_at DESC"),
-        {"id": str(patient_id)},
-    )
-    vitals = [dict(r) for r in vitals_result.mappings().all()]
-
-    # All medications (active and discontinued)
-    meds_result = await db.execute(
-        text("SELECT * FROM medications WHERE patient_id = :id ORDER BY status, drug_name"),
-        {"id": str(patient_id)},
-    )
-    medications = [dict(r) for r in meds_result.mappings().all()]
-
-    # All pharmacy orders (delivery status)
-    pharm_result = await db.execute(
-        text("SELECT * FROM pharmaceutical_orders WHERE patient_id = :id ORDER BY created_at DESC"),
-        {"id": str(patient_id)},
-    )
-    pharm_orders = [dict(r) for r in pharm_result.mappings().all()]
-
-    # All OASIS assessments
-    oasis_result = await db.execute(
-        text("""
-            SELECT oa.*, CONCAT(u.first_name, ' ', u.last_name) AS conducted_by_name
-            FROM oasis_assessments oa
-            LEFT JOIN users u ON u.id = oa.conducted_by
-            WHERE oa.patient_id = :id
-            ORDER BY oa.assessment_date DESC
-        """),
-        {"id": str(patient_id)},
-    )
-    oasis = [dict(r) for r in oasis_result.mappings().all()]
-
-    # All care plans
-    care_plans_result = await db.execute(
-        text("SELECT * FROM care_plans WHERE patient_id = :id ORDER BY start_date DESC"),
-        {"id": str(patient_id)},
-    )
-    care_plans = [dict(r) for r in care_plans_result.mappings().all()]
-
-    # All claims
-    claims_result = await db.execute(
-        text("SELECT * FROM billing_claims WHERE patient_id = :id ORDER BY service_date DESC"),
-        {"id": str(patient_id)},
-    )
-    claims = [dict(r) for r in claims_result.mappings().all()]
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Opened full chart: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id, resource_type="patient", resource_id=patient_id,
-    )
-
-    return {
-        "data": {
-            "patient":      dict(patient),
-            "visits":       visits,
-            "vitals":       vitals,
-            "medications":  medications,
-            "pharm_orders": pharm_orders,
-            "oasis":        oasis,
-            "care_plans":   care_plans,
-            "claims":       claims,
-        }
-    }
-
-
-@router.get(
-    "/{patient_id}/timeline",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient_timeline(
-    patient_id: UUID,
-    limit: int = Query(100, ge=1, le=500),
-    db: AsyncSession = Depends(get_db_for_tenant),
-):
-    """
-    Returns a chronological history feed for a patient, built from the audit
-    trail — every recorded action (discharge, claim filed, medication
-    delivered, SOAP note, OASIS submitted, etc.) tied to this patient.
-    """
-    result = await db.execute(
-        text("""
-            SELECT action, description, user_name, user_role,
-                   resource_type, created_at, success
-            FROM audit_logs
-            WHERE patient_id = :id
-              AND action NOT IN ('PATIENT_VIEWED', 'VITALS_VIEWED',
-                                 'MEDICATION_VIEWED', 'CARE_PLAN_VIEWED',
-                                 'DOCUMENT_VIEWED', 'INTAKE_FORM_VIEWED')
-            ORDER BY created_at DESC
-            LIMIT :limit
-        """),
-        {"id": str(patient_id), "limit": limit},
-    )
-    events = [dict(r) for r in result.mappings().all()]
-    return {"data": events}
-
-
-@router.get(
-    "/map/locations",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient_map_locations(
-    caregiver_id: Optional[UUID] = Query(None, description="Filter to one caregiver's patients"),
-    db: AsyncSession = Depends(get_db_for_tenant),
-):
-    """
-    Returns active patients that have geocoded coordinates, for the map view.
-    Optionally filtered to a single caregiver's assigned patients.
-    """
-    conditions = ["p.deleted_at IS NULL", "p.status = 'active'",
-                  "p.latitude IS NOT NULL", "p.longitude IS NOT NULL"]
-    params = {}
-    if caregiver_id:
-        conditions.append("p.assigned_caregiver = :cg")
-        params["cg"] = str(caregiver_id)
-
-    result = await db.execute(
-        text(f"""
-            SELECT p.id, p.first_name, p.last_name, p.latitude, p.longitude,
-                   p.address_line1, p.city, p.state, p.zip,
-                   p.primary_diagnosis, p.phone,
-                   CONCAT(c.first_name, ' ', c.last_name) AS caregiver_name
-            FROM patients p
-            LEFT JOIN users c ON c.id = p.assigned_caregiver
-            WHERE {' AND '.join(conditions)}
-            ORDER BY p.last_name
-        """),
-        params,
-    )
-    return {"data": [dict(r) for r in result.mappings().all()]}
-
-
-@router.post(
-    "/map/backfill-geocode",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_EDIT))],
-)
-async def backfill_geocode(
-    db: AsyncSession = Depends(get_db_for_tenant),
-):
-    """
-    One-time helper: geocode any active patients that have an address but no
-    coordinates yet. Safe to run repeatedly; only fills in what's missing.
-    """
-    from app.core.geocoding import build_address_string, geocode_address, is_geocoding_configured
-    if not is_geocoding_configured():
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "geocoding_not_configured",
-                    "message": "Add AZURE_MAPS_KEY to enable geocoding."},
-        )
-
-    result = await db.execute(
-        text("""
-            SELECT id, address_line1, city, state, zip
-            FROM patients
-            WHERE deleted_at IS NULL AND status = 'active'
-              AND (latitude IS NULL OR longitude IS NULL)
-              AND address_line1 IS NOT NULL
-            LIMIT 200
-        """),
-    )
-    rows = result.mappings().all()
-    updated = 0
-    for r in rows:
-        addr = build_address_string(r["address_line1"], r["city"], r["state"], r["zip"])
-        coords = await geocode_address(addr)
-        if coords:
-            await db.execute(
-                text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-                {"lat": coords[0], "lon": coords[1], "id": str(r["id"])},
-            )
-            updated += 1
-
-    return {"data": {"checked": len(rows), "geocoded": updated},
-            "message": f"Geocoded {updated} of {len(rows)} patients."}
+      {/* Map */}
+      <div className="card overflow-hidden" style={{ position: 'relative' }}>
+        <div ref={containerRef} style={{ height: '600px', width: '100%', background: '#e8eef0' }} />
+        {isLoading && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.6)' }}>
+            <PageLoader />
+          </div>
+        )}
+        {!isLoading && mappable.length === 0 && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto', maxWidth: 420 }}>
+              <EmptyState
+                icon="🗺️"
+                title="No mapped patients yet"
+                description="Patients appear here once their addresses are geocoded. If you've just added the Azure Maps key, click 'Geocode Existing Patients' above to map your current patients."
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
