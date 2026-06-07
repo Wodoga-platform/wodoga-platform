@@ -12,6 +12,7 @@ DELETE /api/v1/visits/{id}            Cancel a visit
 
 from typing import Optional
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -26,6 +27,20 @@ from app.dependencies import (
     get_current_user_payload,
     get_db_for_tenant,
 )
+
+
+def _to_date(val):
+    """Convert 'YYYY-MM-DD' to a date object for asyncpg DATE columns; pass through None/date."""
+    if isinstance(val, str) and val:
+        return datetime.strptime(val, "%Y-%m-%d").date()
+    return val or None
+
+
+def _to_time(val):
+    """Convert 'HH:MM' to a time object for asyncpg TIME columns; pass through None/time."""
+    if isinstance(val, str) and val:
+        return datetime.strptime(val, "%H:%M").time()
+    return val or None
 
 router = APIRouter(prefix="/visits", tags=["Visits"])
 
@@ -98,13 +113,13 @@ async def list_visits(
         params["status"] = status
     if visit_date:
         conditions.append("v.visit_date = :visit_date")
-        params["visit_date"] = visit_date
+        params["visit_date"] = _to_date(visit_date)
     if date_from:
         conditions.append("v.visit_date >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = _to_date(date_from)
     if date_to:
         conditions.append("v.visit_date <= :date_to")
-        params["date_to"] = date_to
+        params["date_to"] = _to_date(date_to)
 
     # Caregivers only see their own visits
     if current_user.role == "caregiver":
@@ -305,8 +320,8 @@ async def create_visit(
             "patient":    str(body.patient_id),
             "caregiver":  str(body.caregiver_id) if body.caregiver_id else None,
             "care_plan":  str(body.care_plan_id) if body.care_plan_id else None,
-            "date":       body.visit_date,
-            "time":       body.visit_time,
+            "date":       _to_date(body.visit_date),
+            "time":       _to_time(body.visit_time),
             "type":       body.visit_type,
             "notes":      body.notes,
         },
@@ -343,7 +358,14 @@ async def update_visit(
     set_clauses, params = [], {"id": str(visit_id)}
     for field, value in updates.items():
         set_clauses.append(f"{field} = :{field}")
-        params[field] = str(value) if isinstance(value, UUID) else value
+        if field == "visit_date":
+            params[field] = _to_date(value)
+        elif field == "visit_time":
+            params[field] = _to_time(value)
+        elif isinstance(value, UUID):
+            params[field] = str(value)
+        else:
+            params[field] = value
 
     await db.execute(
         text(f"UPDATE visits SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
