@@ -51,6 +51,11 @@ export default function DashboardPage() {
     queryFn:  () => referralService.list('new_lead'),
   });
 
+  const { data: overdueVisits } = useQuery({
+    queryKey: ['visits', 'overdue'],
+    queryFn:  () => visitService.overdue(),
+  });
+
   // ── Derived values ────────────────────────────────────────
   const todayVisits    = visitsData?.data  || [];
   const completedToday = todayVisits.filter(v => v.status === 'completed').length;
@@ -114,6 +119,36 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Alert Banner ── */}
+      {overdueVisits && overdueVisits.length > 0 && (
+        <div className="card mb-5 border-l-4" style={{ borderLeftColor: 'var(--red, #b91c1c)' }}>
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <strong className="text-sm" style={{ color: 'var(--red, #b91c1c)' }}>
+                ⚠ {overdueVisits.length} patient{overdueVisits.length === 1 ? '' : 's'} not seen — overdue visits
+              </strong>
+              <Link href="/visits" className="text-xs font-bold underline text-ink-2">View all visits →</Link>
+            </div>
+            <div className="space-y-1.5">
+              {overdueVisits.slice(0, 5).map((v: any) => (
+                <Link key={v.id} href={`/patients/${v.patient_id}`}
+                  className="flex items-center justify-between text-sm py-1 px-2 rounded hover:bg-bg transition-colors">
+                  <span className="font-medium">{v.first_name} {v.last_name}</span>
+                  <span className="text-xs text-ink-3">
+                    {v.caregiver_name || 'Unassigned'} · scheduled {fmtDate(v.visit_date)}
+                  </span>
+                  <Badge variant={v.days_overdue >= 7 ? 'red' : v.days_overdue >= 3 ? 'amber' : 'gray'}>
+                    {v.days_overdue} day{v.days_overdue === 1 ? '' : 's'} overdue
+                  </Badge>
+                </Link>
+              ))}
+              {overdueVisits.length > 5 && (
+                <div className="text-xs text-ink-3 px-2 pt-1">+ {overdueVisits.length - 5} more</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {vitalsAlerts && vitalsAlerts.length > 0 && (
         <Alert type="error" className="mb-5">
           <strong>⚠ {vitalsAlerts.length} vital alert(s) today</strong> — patients with readings outside
