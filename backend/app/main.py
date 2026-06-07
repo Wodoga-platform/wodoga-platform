@@ -20,7 +20,7 @@ from app.database import check_database_connection, engine
 from app.core.exceptions import WodogaException, to_http_exception
 
 # All API routers
-from app.api.v1 import auth, patients, visits, vitals, eligibility, portal
+from app.api.v1 import auth, patients, visits, vitals, eligibility, portal, documents
 from app.api.v1.clinical_ops import (
     medications_router, care_plans_router, referrals_router,
     billing_router, pharm_router, oasis_router,
@@ -38,6 +38,22 @@ async def lifespan(app: FastAPI):
     if not connected:
         raise RuntimeError("[Wodoga] Database connection failed. Check DATABASE_URL in .env")
     print("[Wodoga] Database connected.")
+
+    # Idempotent lightweight migrations (safe to run on every boot)
+    try:
+        from sqlalchemy import text as _text
+        from app.database import engine as _engine
+        async with _engine.begin() as conn:
+            await conn.execute(_text(
+                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"
+            ))
+            await conn.execute(_text(
+                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION"
+            ))
+        print("[Wodoga] Schema check complete (patient geo columns ensured).")
+    except Exception as e:
+        print(f"[Wodoga] Schema check warning: {e}")
+
     yield
     await engine.dispose()
     print("[Wodoga] Shutdown complete.")
@@ -124,6 +140,7 @@ app.include_router(notifications_router,      prefix=V1)
 app.include_router(staff_router,              prefix=V1)
 app.include_router(audit_router,              prefix=V1)
 app.include_router(portal.router,             prefix=V1)
+app.include_router(documents.router,          prefix=V1)
 
 @app.get("/health", include_in_schema=False)
 async def health_check():
