@@ -12,7 +12,6 @@ DELETE /api/v1/visits/{id}            Cancel a visit
 
 from typing import Optional
 from uuid import UUID
-from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -99,13 +98,13 @@ async def list_visits(
         params["status"] = status
     if visit_date:
         conditions.append("v.visit_date = :visit_date")
-        params["visit_date"] = datetime.strptime(visit_date, '%Y-%m-%d').date()
+        params["visit_date"] = visit_date
     if date_from:
         conditions.append("v.visit_date >= :date_from")
-        params["date_from"] = datetime.strptime(date_from, '%Y-%m-%d').date()
+        params["date_from"] = date_from
     if date_to:
         conditions.append("v.visit_date <= :date_to")
-        params["date_to"] = datetime.strptime(date_to, '%Y-%m-%d').date()
+        params["date_to"] = date_to
 
     # Caregivers only see their own visits
     if current_user.role == "caregiver":
@@ -146,6 +145,87 @@ async def list_visits(
             "total": total, "pages": -(-total // per_page),
         },
     }
+
+
+# ── Overdue / Missed Visit Alerts ──────────────────────────────
+@router.get(
+    "/overdue",
+    dependencies=[Depends(require_permissions(Permission.VISITS_VIEW))],
+)
+async def get_overdue_visits(
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+):
+    """
+    Returns visits that are past their scheduled date but still not completed
+    (a patient who hasn't been seen). Also generates a one-time notification
+    for the assigned caregiver the first time each visit becomes overdue.
+    """
+    # 1) Create one-time alerts for newly-overdue visits with a caregiver assigned
+    newly_overdue = await db.execute(
+        text("""
+            SELECT v.id, v.caregiver_id, v.patient_id, v.visit_date,
+                   p.first_name, p.last_name
+            FROM visits v
+            JOIN patients p ON p.id = v.patient_id
+            WHERE v.organization_id = :org
+              AND v.status = 'scheduled'
+              AND v.visit_date < CURRENT_DATE
+              AND COALESCE(v.overdue_alerted, FALSE) = FALSE
+              AND v.caregiver_id IS NOT NULL
+        """),
+        {"org": str(current_user.organization_id)},
+    )
+    for row in newly_overdue.mappings().all():
+        await db.execute(
+            text("""
+                INSERT INTO notifications (
+                    organization_id, user_id, patient_id,
+                    notification_type, title, body, action_url, priority
+                ) VALUES (
+                    :org, :user, :patient,
+                    'visit_missed', :title, :body, :url, 'high'
+                )
+            """),
+            {
+                "org": str(current_user.organization_id),
+                "user": str(row["caregiver_id"]),
+                "patient": str(row["patient_id"]),
+                "title": "Missed visit",
+                "body": f"{row['first_name']} {row['last_name']} has not been seen — "
+                        f"visit was scheduled for {row['visit_date']}.",
+                "url": f"/patients/{row['patient_id']}",
+            },
+        )
+    # Mark all overdue scheduled visits as alerted so we don't re-notify
+    await db.execute(
+        text("""
+            UPDATE visits SET overdue_alerted = TRUE
+            WHERE organization_id = :org AND status = 'scheduled'
+              AND visit_date < CURRENT_DATE
+              AND COALESCE(overdue_alerted, FALSE) = FALSE
+        """),
+        {"org": str(current_user.organization_id)},
+    )
+
+    # 2) Return the current overdue list with days overdue
+    result = await db.execute(
+        text("""
+            SELECT v.id, v.patient_id, v.visit_date, v.visit_time, v.visit_type,
+                   (CURRENT_DATE - v.visit_date) AS days_overdue,
+                   p.first_name, p.last_name, p.phone, p.primary_diagnosis,
+                   CONCAT(c.first_name, ' ', c.last_name) AS caregiver_name
+            FROM visits v
+            JOIN patients p ON p.id = v.patient_id
+            LEFT JOIN users c ON c.id = v.caregiver_id
+            WHERE v.organization_id = :org
+              AND v.status = 'scheduled'
+              AND v.visit_date < CURRENT_DATE
+            ORDER BY v.visit_date ASC
+        """),
+        {"org": str(current_user.organization_id)},
+    )
+    return {"data": [dict(r) for r in result.mappings().all()]}
 
 
 # ── Get Single Visit ───────────────────────────────────────────
@@ -225,8 +305,8 @@ async def create_visit(
             "patient":    str(body.patient_id),
             "caregiver":  str(body.caregiver_id) if body.caregiver_id else None,
             "care_plan":  str(body.care_plan_id) if body.care_plan_id else None,
-            "date": datetime.strptime(body.visit_date, '%Y-%m-%d').date() if body.visit_date else None,
-            "time": datetime.strptime(body.visit_time, '%H:%M').time() if body.visit_time else None,
+            "date":       body.visit_date,
+            "time":       body.visit_time,
             "type":       body.visit_type,
             "notes":      body.notes,
         },
@@ -263,14 +343,7 @@ async def update_visit(
     set_clauses, params = [], {"id": str(visit_id)}
     for field, value in updates.items():
         set_clauses.append(f"{field} = :{field}")
-        if field == 'visit_time' and isinstance(value, str) and value:
-            params[field] = datetime.strptime(value, '%H:%M').time()
-        elif field == 'visit_date' and isinstance(value, str) and value:
-            params[field] = datetime.strptime(value, '%Y-%m-%d').date()
-        elif isinstance(value, UUID):
-            params[field] = str(value)
-        else:
-            params[field] = value
+        params[field] = str(value) if isinstance(value, UUID) else value
 
     await db.execute(
         text(f"UPDATE visits SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
