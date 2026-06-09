@@ -24,10 +24,11 @@ export default function DashboardPage() {
   });
 
   const { data: visitsData } = useQuery({
-    queryKey: ['visits', 'today'],
+    queryKey: ['visits', 'recent-7d'],
     queryFn:  () => visitService.list({
-      visit_date: format(new Date(), 'yyyy-MM-dd'),
-      per_page: 50,
+      date_from: format(subDays(new Date(), 6), 'yyyy-MM-dd'),
+      date_to:   format(new Date(), 'yyyy-MM-dd'),
+      per_page: 100,
     }),
   });
 
@@ -57,35 +58,45 @@ export default function DashboardPage() {
   });
 
   // ── Derived values ────────────────────────────────────────
-  const todayVisits    = visitsData?.data  || [];
+  const todayStr       = format(new Date(), 'yyyy-MM-dd');
+  const recentVisits   = visitsData?.data  || [];                          // last 7 days
+  const todayVisits    = recentVisits.filter(v => v.visit_date === todayStr);
   const completedToday = todayVisits.filter(v => v.status === 'completed').length;
   const scheduledToday = todayVisits.filter(v => v.status === 'scheduled').length;
   const totalPatients  = patientsData?.pagination.total || 0;
   const activeRx       = meds?.length || 0;
   const pendingClaims  = billingSummary?.pending_count || 0;
 
+  // Visits shown in the dashboard widget: last 7 days, pending first, then most recent
+  const widgetVisits = [...recentVisits].sort((a, b) => {
+    const aPending = a.status === 'scheduled' || a.status === 'in_progress' ? 0 : 1;
+    const bPending = b.status === 'scheduled' || b.status === 'in_progress' ? 0 : 1;
+    if (aPending !== bPending) return aPending - bPending;
+    return (b.visit_date || '').localeCompare(a.visit_date || '');
+  });
+
   // Visit activity chart — last 7 days
   const chartData = useMemo(() => {
     const days = Array.from({ length: 7 }, (_, i) => {
       const d    = subDays(new Date(), 6 - i);
       const key  = format(d, 'yyyy-MM-dd');
-      const count = todayVisits.filter(v => v.visit_date === key).length;
+      const count = recentVisits.filter(v => v.visit_date === key).length;
       return { day: format(d, 'EEE'), date: key, count, isToday: format(d,'yyyy-MM-dd') === format(new Date(),'yyyy-MM-dd') };
     });
     const max = Math.max(...days.map(d => d.count), 1);
     return days.map(d => ({ ...d, pct: Math.max((d.count / max) * 100, 6) }));
-  }, [todayVisits]);
+  }, [recentVisits]);
 
   // Pending actions
   const pendingActions = useMemo(() => {
     const actions = [];
-    const missingSoap = todayVisits.filter(v => v.status === 'completed' && !v.has_soap_note).length;
+    const missingSoap = recentVisits.filter(v => v.status === 'completed' && !v.has_soap_note).length;
     if (missingSoap)            actions.push({ icon: '📝', text: `${missingSoap} completed visit(s) missing SOAP notes`, href: '/visits' });
     if (billingSummary?.denied_count) actions.push({ icon: '❌', text: `${billingSummary.denied_count} denied claim(s) — resubmission needed`, href: '/billing' });
     if (meds?.filter(m => m.refills_remaining === 0).length) actions.push({ icon: '💊', text: 'Medications with 0 refills need authorization', href: '/medications' });
     if (referrals?.length)      actions.push({ icon: '🔗', text: `${referrals.length} new referral(s) need contact`, href: '/referrals' });
     return actions;
-  }, [todayVisits, billingSummary, meds, referrals]);
+  }, [recentVisits, billingSummary, meds, referrals]);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -200,25 +211,26 @@ export default function DashboardPage() {
       {/* ── Main grid ── */}
       <div className="grid grid-cols-2 gap-5 mb-5">
 
-        {/* Today's visits */}
+        {/* Recent visits — rolling 7-day window */}
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="text-sm font-bold">Today's Visits</div>
-              <div className="text-xs text-ink-3 mt-0.5">{format(new Date(), 'EEEE, MMMM d')}</div>
+              <div className="text-sm font-bold">Recent Visits</div>
+              <div className="text-xs text-ink-3 mt-0.5">Last 7 days · pending first</div>
             </div>
             <Link href="/visits">
               <Button size="xs" variant="ghost">View all →</Button>
             </Link>
           </div>
 
-          {todayVisits.length === 0 ? (
-            <EmptyState icon="🏠" title="No visits today" description="Schedule a visit to get started." />
+          {widgetVisits.length === 0 ? (
+            <EmptyState icon="🏠" title="No visits in the last 7 days" description="Schedule a visit to get started." />
           ) : (
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Patient</th>
+                  <th>Date</th>
                   <th>Time</th>
                   <th>Type</th>
                   <th>Status</th>
@@ -226,7 +238,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {todayVisits.slice(0, 6).map(v => (
+                {widgetVisits.slice(0, 8).map(v => (
                   <tr key={v.id}>
                     <td>
                       <div className="flex items-center gap-2">
@@ -234,6 +246,7 @@ export default function DashboardPage() {
                         <span className="font-medium">{v.patient_first} {v.patient_last}</span>
                       </div>
                     </td>
+                    <td className="text-xs text-ink-3">{v.visit_date === todayStr ? 'Today' : fmtDate(v.visit_date)}</td>
                     <td className="font-mono text-xs text-ink-3">{fmtTime(v.visit_time)}</td>
                     <td className="text-xs">{VISIT_TYPE_LABEL[v.visit_type] || v.visit_type}</td>
                     <td>
