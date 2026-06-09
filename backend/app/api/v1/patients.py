@@ -11,10 +11,11 @@ GET    /api/v1/patients/{id}/summary Full patient summary (all linked records)
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
 from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import Permission, TokenPayload, require_permissions
@@ -773,3 +774,108 @@ async def backfill_geocode(
 
     return {"data": {"checked": len(rows), "geocoded": updated},
             "message": f"Geocoded {updated} of {len(rows)} patients."}
+
+
+@router.post(
+    "/import-csv",
+    dependencies=[Depends(require_permissions(Permission.PATIENTS_CREATE))],
+)
+async def import_patients_csv(
+    file: UploadFile = File(...),
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """
+    Bulk-create patients from an uploaded CSV. Expected headers (case-insensitive,
+    flexible): first_name, last_name, date_of_birth, gender, phone, email,
+    address_line1, city, state, zip, primary_diagnosis.
+    Required per row: first_name, last_name, date_of_birth (YYYY-MM-DD).
+    Geocoding is skipped here for speed — run the map backfill afterward.
+    """
+    import csv
+    import io
+
+    raw = await file.read()
+    try:
+        text_data = raw.decode("utf-8-sig")  # handle Excel BOM
+    except UnicodeDecodeError:
+        text_data = raw.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text_data))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail={"error": "empty_csv",
+                            "message": "The CSV appears to be empty or has no header row."})
+
+    # Normalize header names → canonical keys
+    def norm(s: str) -> str:
+        return (s or "").strip().lower().replace(" ", "_")
+
+    valid_genders = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
+    valid_blood = {"a+","a-","b+","b-","ab+","ab-","o+","o-","unknown"}
+
+    created, errors = 0, []
+    row_num = 1
+    for row in reader:
+        row_num += 1
+        r = {norm(k): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
+        first = r.get("first_name") or r.get("firstname") or r.get("first")
+        last = r.get("last_name") or r.get("lastname") or r.get("last")
+        dob = r.get("date_of_birth") or r.get("dob") or r.get("birthdate")
+
+        if not (first and last and dob):
+            errors.append(f"Row {row_num}: missing required first_name, last_name, or date_of_birth")
+            continue
+
+        # Validate date
+        try:
+            dob_val = datetime.strptime(dob, "%Y-%m-%d").date()
+        except ValueError:
+            errors.append(f"Row {row_num}: date_of_birth '{dob}' must be YYYY-MM-DD")
+            continue
+
+        gender = norm(r.get("gender") or "")
+        gender = gender if gender in valid_genders else None
+        blood = (r.get("blood_type") or "").strip().lower()
+        blood = blood if blood in valid_blood else None
+
+        try:
+            await db.execute(
+                text("""
+                    INSERT INTO patients (
+                        organization_id, first_name, last_name, date_of_birth,
+                        gender, phone, email, address_line1, city, state, zip,
+                        blood_type, primary_diagnosis, status
+                    ) VALUES (
+                        :org, :fn, :ln, :dob,
+                        :gender, :phone, :email, :addr1, :city, :state, :zip,
+                        :blood, :dx, 'active'
+                    )
+                """),
+                {
+                    "org": str(current_user.organization_id),
+                    "fn": first, "ln": last, "dob": dob_val,
+                    "gender": gender,
+                    "phone": r.get("phone") or None,
+                    "email": r.get("email") or None,
+                    "addr1": r.get("address_line1") or r.get("address") or None,
+                    "city": r.get("city") or None,
+                    "state": r.get("state") or None,
+                    "zip": r.get("zip") or r.get("zip_code") or r.get("postal_code") or None,
+                    "blood": blood,
+                    "dx": r.get("primary_diagnosis") or r.get("diagnosis") or None,
+                },
+            )
+            created += 1
+        except Exception as e:
+            errors.append(f"Row {row_num}: {str(e)[:120]}")
+
+    await audit.log(
+        AuditAction.PATIENT_CREATED,
+        f"Imported {created} patient(s) from CSV ({len(errors)} skipped)",
+        resource_type="patient",
+    )
+    return {
+        "data": {"created": created, "skipped": len(errors), "errors": errors[:25]},
+        "message": f"Imported {created} patient(s). {len(errors)} row(s) skipped.",
+    }
