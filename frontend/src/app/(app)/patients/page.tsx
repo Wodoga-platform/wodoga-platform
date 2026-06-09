@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -56,6 +56,8 @@ export default function PatientsPage() {
   const [createOpen,   setCreateOpen]   = useState(false);
   const [selected,     setSelected]     = useState<Patient | null>(null);
   const [detailTab,    setDetailTab]    = useState<'info' | 'vitals' | 'meds' | 'visits' | 'billing'>('info');
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   // ── Queries ────────────────────────────────────────────────
   const { data, isLoading } = useQuery({
@@ -91,6 +93,16 @@ export default function PatientsPage() {
     },
   });
 
+  const importMutation = useMutation({
+    mutationFn: (file: File) => patientService.importCsv(file),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      setImportResult(res.data);
+      toast.success(res.message);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail?.message || 'CSV import failed.'),
+  });
+
   // ── Form ───────────────────────────────────────────────────
   const { register, handleSubmit, formState: { errors }, reset } = useForm<PatientForm>({
     resolver: zodResolver(patientSchema),
@@ -99,7 +111,7 @@ export default function PatientsPage() {
   const onSubmit = (data: PatientForm) => {
     const { allergies_str, insurance_provider, insurance_member_id, ...rest } = data;
     createMutation.mutate({
-      ...(rest as any),
+      ...rest,
       email:     rest.email || undefined,
       allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
       insurance_primary: insurance_provider
@@ -122,7 +134,20 @@ export default function PatientsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" icon={<Upload size={13} />}>Import CSV</Button>
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) importMutation.mutate(f);
+              if (csvInputRef.current) csvInputRef.current.value = '';
+            }}
+          />
+          <Button variant="secondary" size="sm" icon={<Upload size={13} />}
+            loading={importMutation.isPending}
+            onClick={() => csvInputRef.current?.click()}>Import CSV</Button>
           <Button variant="primary"   size="sm" icon={<Plus   size={13} />} onClick={() => setCreateOpen(true)}>
             New Patient
           </Button>
@@ -508,6 +533,42 @@ export default function PatientsPage() {
           </div>
         </form>
       </Modal>
+
+      {/* ── CSV Import Results ── */}
+      {importResult && (
+        <Modal
+          open={!!importResult}
+          onClose={() => setImportResult(null)}
+          title="CSV Import Complete"
+          footer={<ModalFooter><Button variant="primary" onClick={() => setImportResult(null)}>Done</Button></ModalFooter>}
+        >
+          <div className="space-y-3">
+            <div className="flex gap-4">
+              <div className="flex-1 text-center p-3 rounded border border-surface-border bg-forest-ghost">
+                <div className="text-2xl font-bold text-forest">{importResult.created}</div>
+                <div className="text-xs text-ink-3 mt-0.5">Patients created</div>
+              </div>
+              <div className="flex-1 text-center p-3 rounded border border-surface-border bg-bg">
+                <div className="text-2xl font-bold text-ink-2">{importResult.skipped}</div>
+                <div className="text-xs text-ink-3 mt-0.5">Rows skipped</div>
+              </div>
+            </div>
+            {importResult.errors.length > 0 && (
+              <div>
+                <div className="text-xs font-bold text-ink-2 mb-1.5">Skipped rows:</div>
+                <div className="max-h-48 overflow-y-auto space-y-1 text-xs text-ink-3 bg-bg rounded border border-surface-border p-2.5">
+                  {importResult.errors.map((e, i) => <div key={i}>• {e}</div>)}
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-ink-3">
+              Expected CSV columns: first_name, last_name, date_of_birth (YYYY-MM-DD), and optionally
+              gender, phone, email, address_line1, city, state, zip, primary_diagnosis. After importing,
+              visit the Patient Map and click "Geocode Existing Patients" to map their addresses.
+            </p>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
