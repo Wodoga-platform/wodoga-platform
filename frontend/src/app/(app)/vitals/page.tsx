@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Alert } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { vitalsService, patientService } from '@/services';
@@ -22,6 +22,12 @@ export default function VitalsPage() {
   const { data: patients } = useQuery({
     queryKey: ['patients', 'list-simple'],
     queryFn:  () => patientService.list({ per_page: 100 }),
+  });
+
+  const dismissMut = useMutation({
+    mutationFn: (id: string) => vitalsService.acknowledge(id),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['vitals', 'alerts'] }); toast.success('Alert dismissed ✓'); },
+    onError:    () => toast.error('Failed to dismiss alert.'),
   });
 
   const addMut = useMutation({
@@ -51,7 +57,7 @@ export default function VitalsPage() {
         <div className="card-header"><div className="text-sm font-bold">Recent Alerts (7 days)</div><div className="text-xs text-ink-3">{alerts.length} flagged readings</div></div>
         {alerts.length === 0 ? <EmptyState icon="💚" title="No alerts" description="All vitals readings are within normal range." /> : (
           <table className="data-table">
-            <thead><tr><th>Patient</th><th>Recorded</th><th>BP</th><th>O₂ Sat</th><th>Heart Rate</th><th>Glucose</th><th>Temp</th><th>Flags</th></tr></thead>
+            <thead><tr><th>Patient</th><th>Recorded</th><th>BP</th><th>O₂ Sat</th><th>Heart Rate</th><th>Glucose</th><th>Temp</th><th>Flags</th><th></th></tr></thead>
             <tbody>
               {alerts.map(v => (
                 <tr key={v.id}>
@@ -75,6 +81,16 @@ export default function VitalsPage() {
                       {v.flag_low_glucose  && <Badge variant="amber" className="text-[10px]">Low Gluc</Badge>}
                       {v.flag_high_temp  && <Badge variant="amber" className="text-[10px]">High Temp</Badge>}
                     </div>
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => dismissMut.mutate(v.id)}
+                      disabled={dismissMut.isPending}
+                      title="Dismiss alert"
+                      className="flex items-center gap-1 text-xs text-ink-3 hover:text-red transition-colors font-medium"
+                    >
+                      <X size={13} /> Dismiss
+                    </button>
                   </td>
                 </tr>
               ))}
