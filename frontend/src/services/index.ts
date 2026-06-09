@@ -75,6 +75,14 @@ export const patientService = {
       '/patients/map/backfill-geocode',
     ).then(r => r.data),
 
+  importCsv: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiClient.post<{ data: { created: number; skipped: number; errors: string[] }; message: string }>(
+      '/patients/import-csv', form, { headers: { 'Content-Type': undefined as any } },
+    ).then(r => r.data);
+  },
+
   create: (body: Partial<Patient>) =>
     apiClient.post<{ data: Patient }>('/patients', body).then(r => r.data.data),
 
@@ -142,6 +150,9 @@ export const vitalsService = {
 
   alerts: (days?: number) =>
     apiClient.get<{ data: Vitals[] }>('/vitals/alerts', { params: { days } }).then(r => r.data.data),
+
+  acknowledge: (id: string) =>
+    apiClient.post(`/vitals/${id}/acknowledge`).then(r => r.data),
 
   get: (id: string) =>
     apiClient.get<{ data: Vitals }>(`/vitals/${id}`).then(r => r.data.data),
