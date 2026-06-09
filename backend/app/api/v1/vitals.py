@@ -273,6 +273,7 @@ async def vitals_alerts(
             JOIN patients p ON p.id = v.patient_id
             LEFT JOIN users u ON u.id = v.recorded_by
             WHERE v.recorded_at >= NOW() - (:days || ' days')::interval
+              AND COALESCE(v.alert_acknowledged, FALSE) = FALSE
               AND (
                 v.flag_low_o2 = TRUE OR v.flag_high_bp = TRUE OR
                 v.flag_low_bp = TRUE OR v.flag_high_glucose = TRUE OR
@@ -283,6 +284,37 @@ async def vitals_alerts(
         {"days": str(days)},
     )
     return {"data": [dict(r) for r in result.mappings().all()]}
+
+
+@router.post(
+    "/{vitals_id}/acknowledge",
+    dependencies=[Depends(require_permissions(Permission.VITALS_VIEW))],
+)
+async def acknowledge_vitals_alert(
+    vitals_id: UUID,
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """Dismiss a vitals alert once a provider has reviewed it."""
+    result = await db.execute(
+        text("""
+            UPDATE vitals SET alert_acknowledged = TRUE
+            WHERE id = :id
+            RETURNING id, patient_id
+        """),
+        {"id": str(vitals_id)},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    await audit.log(
+        AuditAction.VITALS_RECORDED,
+        "Vitals alert reviewed and dismissed",
+        patient_id=row["patient_id"], resource_type="vitals", resource_id=vitals_id,
+    )
+    return {"data": {"acknowledged": True}, "message": "Alert dismissed."}
 
 
 # ── Single Vitals Record ───────────────────────────────────────
