@@ -1,14 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import toast from 'react-hot-toast';
 import {
   ArrowLeft, Activity, Pill, Home, ClipboardList, FileText,
   Receipt, Clock, Truck, AlertTriangle, Image as ImageIcon,
+  Upload, Trash2, X as XIcon, Plus, UserMinus,
 } from 'lucide-react';
 import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField } from '@/components/ui';
-import { patientService } from '@/services';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { patientService, documentService, vitalsService, visitService, staffService } from '@/services';
 import {
   fmtDate, fmtTime, fmtDateTime, fmtRelative, fmtCurrency, calcAge,
   VISIT_TYPE_LABEL, PHARM_STAGE_LABEL, CLAIM_STATUS_BADGE,
@@ -69,6 +73,85 @@ export default function PatientChartPage() {
     enabled:  !!id,
   });
 
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [docType, setDocType] = useState('imaging');
+  const [viewerUrl, setViewerUrl] = useState<{ url: string; mime: string; name: string } | null>(null);
+
+  const { data: storageStatus } = useQuery({
+    queryKey: ['storage-status'],
+    queryFn:  () => documentService.storageStatus(),
+  });
+
+  const { data: documents = [] } = useQuery({
+    queryKey: ['patient-documents', id],
+    queryFn:  () => documentService.listForPatient(id),
+    enabled:  !!id,
+  });
+
+  const uploadMut = useMutation({
+    mutationFn: (file: File) => documentService.upload(id, file, docType, ''),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['patient-documents', id] });
+      qc.invalidateQueries({ queryKey: ['patient-timeline', id] });
+      toast.success('Document uploaded ✓');
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.detail?.message || e?.message || 'Upload failed.'),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (docId: string) => documentService.remove(docId),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['patient-documents', id] }); toast.success('Document deleted ✓'); },
+    onError: () => toast.error('Failed to delete document.'),
+  });
+
+  const openDocument = async (docId: string) => {
+    try {
+      const res = await documentService.getViewUrl(docId);
+      setViewerUrl({ url: res.url, mime: res.mime_type, name: res.file_name });
+    } catch {
+      toast.error('Could not open document.');
+    }
+  };
+
+  // ── Record vitals / schedule visit / discharge ──────────────
+  const [vitalsOpen, setVitalsOpen] = useState(false);
+  const [visitOpen, setVisitOpen]   = useState(false);
+
+  const { data: caregivers } = useQuery({
+    queryKey: ['staff', 'caregivers'],
+    queryFn:  () => staffService.list('caregiver'),
+  });
+
+  const refreshChart = () => {
+    qc.invalidateQueries({ queryKey: ['patient-chart', id] });
+    qc.invalidateQueries({ queryKey: ['patient-timeline', id] });
+  };
+
+  const { register: rv, handleSubmit: hv, reset: resetVitals } = useForm();
+  const vitalsMut = useMutation({
+    mutationFn: (body: any) => vitalsService.record({ ...body, patient_id: id }),
+    onSuccess: (data: any) => {
+      refreshChart();
+      toast.success('Vitals recorded' + (data?.alerts?.length ? ` ⚠ ${data.alerts.length} alert(s)` : ' ✓'));
+      setVitalsOpen(false); resetVitals();
+    },
+    onError: () => toast.error('Failed to record vitals.'),
+  });
+
+  const { register: rvs, handleSubmit: hvs, reset: resetVisit } = useForm();
+  const visitMut = useMutation({
+    mutationFn: (body: any) => visitService.create({ ...body, patient_id: id }),
+    onSuccess: () => { refreshChart(); toast.success('Visit scheduled ✓'); setVisitOpen(false); resetVisit(); },
+    onError: () => toast.error('Failed to schedule visit.'),
+  });
+
+  const dischargeMut = useMutation({
+    mutationFn: () => patientService.update(id, { status: 'discharged' as any }),
+    onSuccess: () => { refreshChart(); qc.invalidateQueries({ queryKey: ['patients'] }); toast.success('Patient discharged'); },
+    onError: () => toast.error('Failed to discharge patient.'),
+  });
+
   if (isLoading) return <PageLoader />;
   if (!chart)    return <EmptyState icon="🔍" title="Patient not found" />;
 
@@ -119,6 +202,18 @@ export default function PatientChartPage() {
               {p.phone && <div>{p.phone}</div>}
               {[p.address_line1, p.city, p.state].filter(Boolean).length > 0 && (
                 <div>{[p.address_line1, p.city, p.state].filter(Boolean).join(', ')}</div>
+              )}
+              {p.status === 'active' && (
+                <div className="pt-2">
+                  <Button size="xs" variant="secondary" icon={<UserMinus size={11} />}
+                    loading={dischargeMut.isPending}
+                    onClick={() => {
+                      if (confirm(`Discharge ${p.first_name} ${p.last_name}? This marks the patient as discharged.`))
+                        dischargeMut.mutate();
+                    }}>
+                    Discharge Patient
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -192,6 +287,11 @@ export default function PatientChartPage() {
       {/* ── Visits ── */}
       {tab === 'visits' && (
         <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setVisitOpen(true)}>
+              Schedule Visit
+            </Button>
+          </div>
           {chart.visits.length === 0 ? (
             <div className="card"><EmptyState icon="🏠" title="No visits recorded" /></div>
           ) : chart.visits.map((v: any) => (
@@ -229,7 +329,13 @@ export default function PatientChartPage() {
 
       {/* ── Vitals ── */}
       {tab === 'vitals' && (
-        <div className="card">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setVitalsOpen(true)}>
+              Record Vitals
+            </Button>
+          </div>
+          <div className="card">
           {chart.vitals.length === 0 ? <EmptyState icon="❤️" title="No vitals recorded" /> : (
             <table className="data-table">
               <thead><tr><th>Date</th><th>BP</th><th>HR</th><th>O₂</th><th>Temp</th><th>Resp</th><th>Weight</th><th>Pain</th><th>Flags</th></tr></thead>
@@ -254,6 +360,7 @@ export default function PatientChartPage() {
               </tbody>
             </table>
           )}
+          </div>
         </div>
       )}
 
@@ -355,14 +462,172 @@ export default function PatientChartPage() {
 
       {/* ── Documents (wound care images, etc.) ── */}
       {tab === 'documents' && (
-        <div className="card p-8">
-          <EmptyState
-            icon="🖼️"
-            title="Document & image storage coming online"
-            description="Wound-care photos, scanned forms, and clinical documents will live here. This requires secure cloud storage, which is the next piece being set up."
-          />
+        <div className="space-y-4">
+          {!storageStatus?.configured && (
+            <div className="card p-4 flex items-start gap-3" style={{ background: 'var(--amber-ghost, #fffbeb)' }}>
+              <AlertTriangle size={18} className="text-amber flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-ink-2">
+                <span className="font-semibold">Storage not connected yet.</span> Uploads will fail until the
+                Azure storage connection is added. Everything else here is ready.
+              </div>
+            </div>
+          )}
+
+          {/* Upload bar */}
+          <div className="card p-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <select className="form-select w-auto" value={docType} onChange={e => setDocType(e.target.value)}>
+                <option value="imaging">Wound Care Photo</option>
+                <option value="consent_form">Consent Form</option>
+                <option value="physician_order">Physician Order</option>
+                <option value="lab_result">Lab Result</option>
+                <option value="insurance_card">Insurance Card</option>
+                <option value="id_document">ID Document</option>
+                <option value="other">Other</option>
+              </select>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadMut.mutate(f);
+                  if (fileRef.current) fileRef.current.value = '';
+                }}
+              />
+              <Button variant="primary" icon={<Upload size={14} />}
+                loading={uploadMut.isPending}
+                onClick={() => fileRef.current?.click()}>
+                Upload File
+              </Button>
+              <span className="text-xs text-ink-3">Images (JPG, PNG, WEBP, HEIC) or PDF · up to 25 MB</span>
+            </div>
+          </div>
+
+          {/* Gallery */}
+          {documents.length === 0 ? (
+            <div className="card"><EmptyState icon="🖼️" title="No documents yet"
+              description="Upload wound-care photos, signed forms, or other clinical documents above." /></div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {documents.map((d: any) => {
+                const isImage = d.mime_type?.startsWith('image/');
+                return (
+                  <div key={d.id} className="card overflow-hidden group">
+                    <button onClick={() => openDocument(d.id)}
+                      className="w-full h-32 bg-bg flex items-center justify-center hover:bg-surface-2 transition-colors">
+                      {isImage
+                        ? <ImageIcon size={28} className="text-ink-4" />
+                        : <FileText size={28} className="text-ink-4" />}
+                    </button>
+                    <div className="p-2.5">
+                      <div className="flex items-start justify-between gap-1">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold truncate" title={d.file_name}>{d.file_name}</div>
+                          <div className="text-[10px] text-ink-3 mt-0.5">{d.document_type?.replace(/_/g, ' ')}</div>
+                          <div className="text-[10px] text-ink-4">{fmtDate(d.created_at)}</div>
+                        </div>
+                        <button onClick={() => { if (confirm('Delete this document?')) deleteMut.mutate(d.id); }}
+                          className="text-ink-4 hover:text-red transition-colors flex-shrink-0">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
+
+      {/* Document viewer modal */}
+      {viewerUrl && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6"
+          onClick={() => setViewerUrl(null)}>
+          <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
+              <span className="text-sm font-semibold truncate">{viewerUrl.name}</span>
+              <div className="flex items-center gap-3">
+                <a href={viewerUrl.url} target="_blank" rel="noopener noreferrer"
+                  className="text-xs text-forest font-semibold hover:underline">Open / Download</a>
+                <button onClick={() => setViewerUrl(null)} className="text-ink-3 hover:text-ink"><XIcon size={18} /></button>
+              </div>
+            </div>
+            <div className="overflow-auto p-2 flex items-center justify-center bg-bg">
+              {viewerUrl.mime?.startsWith('image/')
+                ? <img src={viewerUrl.url} alt={viewerUrl.name} className="max-w-full max-h-[75vh] object-contain" />
+                : <iframe src={viewerUrl.url} className="w-[80vw] h-[75vh]" title={viewerUrl.name} />}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Record Vitals Modal ── */}
+      <Modal
+        open={vitalsOpen}
+        onClose={() => { setVitalsOpen(false); resetVitals(); }}
+        title="Record Vital Signs"
+        subtitle={`${p.first_name} ${p.last_name}`}
+        size="lg"
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setVitalsOpen(false)}>Cancel</Button>
+            <Button variant="primary" loading={vitalsMut.isPending} onClick={hv(d => vitalsMut.mutate(d))}>Save Vitals</Button>
+          </ModalFooter>
+        }
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className="form-label">BP Systolic</label><input type="number" className="form-input" placeholder="120" {...rv('bp_systolic')} /></div>
+            <div><label className="form-label">BP Diastolic</label><input type="number" className="form-input" placeholder="80" {...rv('bp_diastolic')} /></div>
+            <div><label className="form-label">Heart Rate</label><input type="number" className="form-input" placeholder="72" {...rv('heart_rate')} /></div>
+            <div><label className="form-label">O₂ Saturation (%)</label><input type="number" className="form-input" placeholder="98" min="50" max="100" {...rv('oxygen_saturation')} /></div>
+            <div><label className="form-label">Resp. Rate</label><input type="number" className="form-input" placeholder="16" {...rv('respiratory_rate')} /></div>
+            <div><label className="form-label">Temperature (°F)</label><input type="number" step="0.1" className="form-input" placeholder="98.6" {...rv('temperature')} /></div>
+            <div><label className="form-label">Weight (lbs)</label><input type="number" step="0.1" className="form-input" {...rv('weight_lbs')} /></div>
+            <div><label className="form-label">Blood Glucose</label><input type="number" className="form-input" {...rv('blood_glucose')} /></div>
+            <div><label className="form-label">Pain Scale (0–10)</label><input type="number" min="0" max="10" className="form-input" {...rv('pain_scale')} /></div>
+          </div>
+          <div><label className="form-label">Notes</label><textarea className="form-textarea" rows={2} {...rv('notes')} /></div>
+        </div>
+      </Modal>
+
+      {/* ── Schedule Visit Modal ── */}
+      <Modal
+        open={visitOpen}
+        onClose={() => { setVisitOpen(false); resetVisit(); }}
+        title="Schedule Home Visit"
+        subtitle={`${p.first_name} ${p.last_name}`}
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setVisitOpen(false)}>Cancel</Button>
+            <Button variant="primary" loading={visitMut.isPending} onClick={hvs(d => visitMut.mutate(d))}>Schedule Visit</Button>
+          </ModalFooter>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="form-label">Caregiver</label>
+            <select className="form-select" {...rvs('caregiver_id')}>
+              <option value="">Assign caregiver...</option>
+              {caregivers?.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="form-label">Date *</label><input type="date" className="form-input" {...rvs('visit_date', { required: true })} /></div>
+            <div><label className="form-label">Time</label><input type="time" className="form-input" {...rvs('visit_time')} /></div>
+          </div>
+          <div>
+            <label className="form-label">Visit Type</label>
+            <select className="form-select" {...rvs('visit_type', { required: true })}>
+              {Object.entries(VISIT_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div><label className="form-label">Notes</label><textarea className="form-textarea" rows={2} {...rvs('notes')} /></div>
+        </div>
+      </Modal>
     </>
   );
 }
