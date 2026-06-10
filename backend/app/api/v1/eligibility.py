@@ -156,6 +156,11 @@ async def check_eligibility(
             "deductible_remaining": result_data.get("deductible_remaining"),
             "patient_name":      patient_name,
             "provider_used":     provider,
+            "is_simulated":      provider not in ("waystar", "availity"),
+            "simulation_warning": (
+                "DEMO RESULT — simulated insurance check, not a real "
+                "verification."
+            ) if provider not in ("waystar", "availity") else None,
             "error":             error_message,
         }
     }
