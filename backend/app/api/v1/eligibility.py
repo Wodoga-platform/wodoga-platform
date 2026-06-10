@@ -121,7 +121,7 @@ async def check_eligibility(
             "insurer":      body.insurance_provider,
             "member":       body.member_id,
             "group":        body.group_id,
-            "service_date": body.service_date,
+            "service_date": date.fromisoformat(str(body.service_date)) if body.service_date else None,
             "result":       result_data.get("result", "error"),
             "active":       result_data.get("coverage_active", False),
             "details":      json.dumps(result_data.get("coverage_details", {})),
