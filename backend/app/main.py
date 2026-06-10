@@ -38,6 +38,30 @@ async def lifespan(app: FastAPI):
     if not connected:
         raise RuntimeError("[Wodoga] Database connection failed. Check DATABASE_URL in .env")
     print("[Wodoga] Database connected.")
+    # ── PRODUCTION SAFETY GUARD ───────────────────────────────
+    if settings.is_production:
+        _problems = []
+        if settings.eligibility_provider not in ("waystar", "availity"):
+            _problems.append(
+                "ELIGIBILITY_PROVIDER is 'simulated' — insurance checks "
+                "would be FAKE. Set it to 'availity' or 'waystar'."
+            )
+        for _key_name in ("secret_key", "jwt_secret_key", "encryption_key"):
+            _v = str(getattr(settings, _key_name, "") or "")
+            if (not _v) or ("CHANGE_THIS" in _v) or (len(_v) < 24):
+                _problems.append(
+                    f"{_key_name.upper()} is missing or looks like a "
+                    "placeholder."
+                )
+        if getattr(settings, "debug", False):
+            _problems.append("DEBUG=true in production. Set DEBUG=false.")
+        if _problems:
+            for _p in _problems:
+                print(f"[Wodoga] UNSAFE FOR PRODUCTION: {_p}")
+            raise RuntimeError(
+                "Wodoga refused to start in production mode. Fix the "
+                "problems above in the environment variables and restart."
+            )
 
     # Idempotent lightweight migrations (safe to run on every boot)
     try:
