@@ -1182,7 +1182,10 @@ async def invite_staff(
         raise HTTPException(status_code=400, detail={"error": "invalid_role"})
 
     invite_token = generate_invite_token()
-    temp_password = hash_password("ChangeMe!123")  # Forces password change on first login
+    # Account starts with a random unknowable password — the only
+    # way in is the email invitation link.
+    import secrets as _secrets
+    temp_password = hash_password(_secrets.token_urlsafe(48))
 
     result = await db.execute(
         text("""
