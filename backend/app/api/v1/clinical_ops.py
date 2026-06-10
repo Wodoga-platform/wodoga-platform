@@ -1217,14 +1217,40 @@ async def invite_staff(
         resource_type="user", resource_id=staff_member["id"],
     )
 
-    # TODO: Send invitation email via SendGrid
-    # await email_service.send_staff_invite(staff_member["email"], invite_token)
+   # ── Send the invitation email ─────────────────────────────
+    from app.services import email as email_service
+    from app.config import get_settings as _get_settings
 
-    return {
+    org_result = await db.execute(
+        text("SELECT name FROM organizations WHERE id = :org"),
+        {"org": str(current_user.organization_id)},
+    )
+    org_row = org_result.mappings().first()
+    org_name = org_row["name"] if org_row else "your organization"
+
+    email_sent = await email_service.send_staff_invite(
+        to_email=staff_member["email"],
+        first_name=staff_member["first_name"],
+        organization_name=org_name,
+        invite_token=invite_token,
+    )
+
+    response: dict = {
         "data": dict(staff_member),
-        "message": "Staff member invited. Invitation email will be sent.",
-        "invite_token": invite_token,  # Remove in production — for dev/testing only
+        "message": (
+            "Staff member invited. An invitation email has been sent."
+            if email_sent else
+            "Staff member created, but the invitation email could NOT be "
+            "sent (email service is not configured)."
+        ),
+        "email_sent": email_sent,
     }
+
+    # Secret link is only shown in development mode, for testing.
+    if _get_settings().is_development:
+        response["invite_token"] = invite_token
+
+    return response
 
 
 @staff_router.patch(
