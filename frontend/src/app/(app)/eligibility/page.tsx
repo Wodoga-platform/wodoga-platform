@@ -34,6 +34,13 @@ export default function EligibilityPage() {
 
   const resultVariant = result ? ELIGIBILITY_BADGE[result.result as keyof typeof ELIGIBILITY_BADGE] : null;
 
+  const simulationBanner = result?.is_simulated ? (
+    <div className="mb-4 rounded-md border-2 border-amber-400 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+      ⚠ DEMO MODE — This result is SIMULATED, not a real insurance
+      verification. Do not rely on it for scheduling or billing.
+    </div>
+  ) : null;
+
   return (
     <>
       <div className="mb-6"><h1 className="page-title">Insurance Eligibility</h1><p className="page-subtitle">Verify patient coverage before visits to prevent denied claims</p></div>
@@ -54,6 +61,7 @@ export default function EligibilityPage() {
           </div>
         </div>
         <div>
+          {simulationBanner}
           {result && resultVariant ? (
             <div className={`card p-6 text-center border-2 ${
               result.result === 'eligible' ? 'border-forest-light bg-forest-ghost' :
