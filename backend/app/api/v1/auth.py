@@ -287,7 +287,9 @@ async def verify_mfa(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"error": "invalid_token"})
 
     # Verify the TOTP code
-    if not verify_mfa_code(user["mfa_secret"], body.mfa_code):
+    from app.core.security import decrypt_field
+        _secret = decrypt_field(user["mfa_secret"])
+        if not verify_mfa_code(_secret, body.mfa_code):
         await _log_failed_login(db, user["email"], ip, "Invalid MFA code", user_id=user["id"])
         await db.commit()
         raise HTTPException(
