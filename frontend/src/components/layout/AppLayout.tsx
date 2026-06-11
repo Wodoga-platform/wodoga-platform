@@ -221,6 +221,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
 
           {/* User */}
+          <Link href="/settings">
           <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white/8 border border-white/12
                           rounded cursor-pointer hover:bg-white/14 transition-colors">
             <Avatar firstName={user.first_name} lastName={user.last_name} size="sm" />
@@ -231,7 +232,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </div>
             </div>
           </div>
-
+</Link>
           {/* Sign out */}
           <button
             onClick={handleSignOut}
