@@ -39,8 +39,16 @@ export const authService = {
 
   confirmMFA: (mfa_code: string) =>
     apiClient.post('/auth/confirm-mfa', { mfa_code }),
-};
+  
+  disableMFA: (mfa_code: string, password: string) =>
+    apiClient.post('/auth/disable-mfa', { mfa_code, password }),
 
+  forgotPassword: (email: string) =>
+    apiClient.post('/auth/forgot-password', { email }),
+
+  resetPassword: (token: string, new_password: string) =>
+    apiClient.post('/auth/reset-password', { token, new_password }),
+};
 // ════════════════════════════════════════════════════════════
 // PATIENTS
 // ════════════════════════════════════════════════════════════
