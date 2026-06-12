@@ -382,6 +382,118 @@ async def logout(
     await db.commit()
 
 
+# ── Forgot Password (request a reset link) ────────────────────
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Sends a password-reset email if the address belongs to an account.
+
+    Always returns the same neutral success response whether or not the
+    email exists, so attackers can't use this to discover which emails
+    are registered.
+    """
+    result = await db.execute(
+        text("""
+            SELECT id, first_name, email
+            FROM users
+            WHERE email = :email AND deleted_at IS NULL
+        """),
+        {"email": body.email.lower()},
+    )
+    user = result.mappings().first()
+
+    if user:
+        reset_token = generate_password_reset_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        await db.execute(
+            text("""
+                UPDATE users
+                SET password_reset_token = :tok, password_reset_exp = :exp
+                WHERE id = :id
+            """),
+            {"tok": reset_token, "exp": expires_at, "id": str(user["id"])},
+        )
+        await db.commit()
+
+        # Send the email (no-op if SendGrid isn't configured yet)
+        from app.services import email as email_service
+        await email_service.send_password_reset(
+            to_email=user["email"],
+            first_name=user["first_name"],
+            reset_token=reset_token,
+        )
+
+    # Neutral response either way
+    return {
+        "message": "If an account exists for that email, a reset link has been sent.",
+    }
+
+
+# ── Reset Password (consume the link) ─────────────────────────
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Sets a new password using a valid, unexpired reset token from the
+    email link. The token is single-use and cleared after success.
+    """
+    result = await db.execute(
+        text("""
+            SELECT id, password_reset_exp
+            FROM users
+            WHERE password_reset_token = :tok AND deleted_at IS NULL
+        """),
+        {"tok": body.token},
+    )
+    user = result.mappings().first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_token",
+                    "message": "This reset link is invalid. Please request a new one."},
+        )
+
+    expires = user["password_reset_exp"]
+    if not expires or expires < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "expired_token",
+                    "message": "This reset link has expired. Please request a new one."},
+        )
+
+    new_hash = hash_password(body.new_password)
+    await db.execute(
+        text("""
+            UPDATE users
+            SET password_hash = :hash,
+                password_changed_at = NOW(),
+                password_reset_token = NULL,
+                password_reset_exp = NULL,
+                failed_login_attempts = 0,
+                locked_until = NULL
+            WHERE id = :id
+        """),
+        {"hash": new_hash, "id": str(user["id"])},
+    )
+    await db.execute(
+        text("""
+            INSERT INTO audit_logs (organization_id, user_id, action, description)
+            SELECT organization_id, id, 'PASSWORD_RESET', 'User reset password via email link'
+            FROM users WHERE id = :id
+        """),
+        {"id": str(user["id"])},
+    )
+    await db.commit()
+
+    return {"message": "Your password has been reset. You can now sign in."}
+
+
 # ── Change Password ───────────────────────────────────────────
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
