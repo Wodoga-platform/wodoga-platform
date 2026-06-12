@@ -12,6 +12,7 @@ export interface AuthUser {
   role:            UserRole;
   organization_id: string;
   permissions:     Permission[];
+  mfa_enabled?:    boolean;
 }
 
 export type UserRole =
