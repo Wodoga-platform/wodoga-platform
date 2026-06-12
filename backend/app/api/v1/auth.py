@@ -551,7 +551,7 @@ async def _issue_tokens(
             "role": user["role_name"],
             "organization_id": str(user["organization_id"]),
             "permissions": permissions,
-            "mfa_enabled": user["mfa_enabled"],
+            "mfa_enabled": dict(user).get("mfa_enabled", False),
         },
     }
 
