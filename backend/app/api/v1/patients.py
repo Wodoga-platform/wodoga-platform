@@ -34,7 +34,7 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
 # Validating here means a bad value comes back as a clean 422 instead of
 # crashing the request with a raw IntegrityError when Postgres rejects it.
 VALID_GENDERS = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
-VALID_BLOOD_TYPES = {"a+", "a-", "b+", "b-", "ab+", "ab-", "o+", "o-", "unknown"}
+VALID_BLOOD_TYPES = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"}
 VALID_FALL_RISK = {"low", "moderate", "high"}
 VALID_PATIENT_STATUSES = {"active", "discharged", "on_hold", "deceased", "transferred"}
 
@@ -50,6 +50,22 @@ def _normalize_choice(value: Optional[str], valid_set: set, field_name: str) -> 
     if normalized not in valid_set:
         raise ValueError(f"{field_name} must be one of {sorted(valid_set)}, got {value!r}")
     return normalized
+
+
+def _normalize_blood_type(value: Optional[str]) -> Optional[str]:
+    """blood_type is the one constrained field that ISN'T all-lowercase in the
+    DB — the schema requires 'A+', 'A-', 'B+', ... (uppercase) but 'unknown'
+    (lowercase). Accepts any case from the client and returns the exact form
+    Postgres' CHECK constraint expects."""
+    if value is None:
+        return value
+    stripped = value.strip()
+    if stripped.lower() == "unknown":
+        return "unknown"
+    upper = stripped.upper()
+    if upper not in {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"}:
+        raise ValueError(f"blood_type must be one of {sorted(VALID_BLOOD_TYPES)}, got {value!r}")
+    return upper
 
 
 # ── Schemas ────────────────────────────────────────────────────
@@ -86,7 +102,7 @@ class PatientCreate(BaseModel):
     @field_validator("blood_type")
     @classmethod
     def validate_blood_type(cls, v):
-        return _normalize_choice(v, VALID_BLOOD_TYPES, "blood_type")
+        return _normalize_blood_type(v)
 
     @field_validator("fall_risk")
     @classmethod
@@ -128,7 +144,7 @@ class PatientUpdate(BaseModel):
     @field_validator("blood_type")
     @classmethod
     def validate_blood_type(cls, v):
-        return _normalize_choice(v, VALID_BLOOD_TYPES, "blood_type")
+        return _normalize_blood_type(v)
 
     @field_validator("fall_risk")
     @classmethod
@@ -891,8 +907,11 @@ async def import_patients_csv(
 
         gender = norm(r.get("gender") or "")
         gender = gender if gender in VALID_GENDERS else None
-        blood = (r.get("blood_type") or "").strip().lower()
-        blood = blood if blood in VALID_BLOOD_TYPES else None
+        blood_raw = (r.get("blood_type") or "").strip()
+        try:
+            blood = _normalize_blood_type(blood_raw) if blood_raw else None
+        except ValueError:
+            blood = None
 
         try:
             await db.execute(
