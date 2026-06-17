@@ -29,6 +29,29 @@ from app.dependencies import (
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
 
+# ── Validation constants ───────────────────────────────────────
+# These must stay in sync with the CHECK constraints in database/schema.sql.
+# Validating here means a bad value comes back as a clean 422 instead of
+# crashing the request with a raw IntegrityError when Postgres rejects it.
+VALID_GENDERS = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
+VALID_BLOOD_TYPES = {"a+", "a-", "b+", "b-", "ab+", "ab-", "o+", "o-", "unknown"}
+VALID_FALL_RISK = {"low", "moderate", "high"}
+VALID_PATIENT_STATUSES = {"active", "discharged", "on_hold", "deceased", "transferred"}
+
+
+def _normalize_choice(value: Optional[str], valid_set: set, field_name: str) -> Optional[str]:
+    """Trims/lowercases a constrained text field and checks it against the
+    allowed values for that column. Returns None unchanged (field is optional);
+    raises ValueError (→ Pydantic 422) if the value doesn't match anything in
+    valid_set once normalized."""
+    if value is None:
+        return value
+    normalized = value.strip().lower().replace(" ", "_")
+    if normalized not in valid_set:
+        raise ValueError(f"{field_name} must be one of {sorted(valid_set)}, got {value!r}")
+    return normalized
+
+
 # ── Schemas ────────────────────────────────────────────────────
 class PatientCreate(BaseModel):
     first_name: str
@@ -54,6 +77,21 @@ class PatientCreate(BaseModel):
     assigned_provider: Optional[UUID] = None
     fall_risk: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v):
+        return _normalize_choice(v, VALID_GENDERS, "gender")
+
+    @field_validator("blood_type")
+    @classmethod
+    def validate_blood_type(cls, v):
+        return _normalize_choice(v, VALID_BLOOD_TYPES, "blood_type")
+
+    @field_validator("fall_risk")
+    @classmethod
+    def validate_fall_risk(cls, v):
+        return _normalize_choice(v, VALID_FALL_RISK, "fall_risk")
 
 
 class PatientUpdate(BaseModel):
@@ -81,6 +119,26 @@ class PatientUpdate(BaseModel):
     fall_risk: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v):
+        return _normalize_choice(v, VALID_GENDERS, "gender")
+
+    @field_validator("blood_type")
+    @classmethod
+    def validate_blood_type(cls, v):
+        return _normalize_choice(v, VALID_BLOOD_TYPES, "blood_type")
+
+    @field_validator("fall_risk")
+    @classmethod
+    def validate_fall_risk(cls, v):
+        return _normalize_choice(v, VALID_FALL_RISK, "fall_risk")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        return _normalize_choice(v, VALID_PATIENT_STATUSES, "status")
 
 
 # ── List Patients ─────────────────────────────────────────────
@@ -811,9 +869,6 @@ async def import_patients_csv(
     def norm(s: str) -> str:
         return (s or "").strip().lower().replace(" ", "_")
 
-    valid_genders = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
-    valid_blood = {"a+","a-","b+","b-","ab+","ab-","o+","o-","unknown"}
-
     created, errors = 0, []
     row_num = 1
     for row in reader:
@@ -835,9 +890,9 @@ async def import_patients_csv(
             continue
 
         gender = norm(r.get("gender") or "")
-        gender = gender if gender in valid_genders else None
+        gender = gender if gender in VALID_GENDERS else None
         blood = (r.get("blood_type") or "").strip().lower()
-        blood = blood if blood in valid_blood else None
+        blood = blood if blood in VALID_BLOOD_TYPES else None
 
         try:
             await db.execute(
