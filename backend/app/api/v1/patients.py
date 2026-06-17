@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, date
 
 from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import Permission, TokenPayload, require_permissions
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
 class PatientCreate(BaseModel):
     first_name: str
     last_name: str
-    date_of_birth: str
+    date_of_birth: date
     gender: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
@@ -59,7 +59,7 @@ class PatientCreate(BaseModel):
 class PatientUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    date_of_birth: Optional[str] = None
+    date_of_birth: Optional[date] = None
     gender: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
