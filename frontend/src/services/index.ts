@@ -363,6 +363,9 @@ export const portalService = {
   myDocuments: () => apiClient.get('/portal/me/documents').then(r => r.data.data),
   sendMessage: (body: { subject: string; body: string }) =>
     apiClient.post('/portal/me/messages', body).then(r => r.data.data),
+  // Staff-facing: invite a patient to the portal, returns a setup link to share
+  invitePatient: (patientId: string) =>
+    apiClient.post(`/portal/invite/${patientId}`).then(r => r.data.data),
 };
 
 // ════════════════════════════════════════════════════════════
