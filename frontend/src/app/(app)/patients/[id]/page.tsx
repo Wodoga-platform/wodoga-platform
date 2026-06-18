@@ -4,11 +4,13 @@ import { useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft, Activity, Pill, Home, ClipboardList, FileText,
   Receipt, Clock, Truck, AlertTriangle, Image as ImageIcon,
-  Upload, Trash2, X as XIcon, Plus, UserMinus,
+  Upload, Trash2, X as XIcon, Plus, UserMinus, Pencil,
 } from 'lucide-react';
 import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
@@ -54,6 +56,26 @@ const EVENT_META: Record<string, { label: string; color: string; icon: any }> = 
 function eventMeta(action: string) {
   return EVENT_META[action] || { label: action.replace(/_/g, ' ').toLowerCase(), color: '#8A8784', icon: Clock };
 }
+
+// ── Edit Patient form ──────────────────────────────────────
+const editPatientSchema = z.object({
+  first_name:        z.string().min(1, 'Required'),
+  last_name:          z.string().min(1, 'Required'),
+  date_of_birth:      z.string().min(1, 'Required'),
+  gender:             z.string().optional(),
+  phone:              z.string().optional(),
+  email:              z.string().email().optional().or(z.literal('')),
+  address_line1:      z.string().optional(),
+  city:               z.string().optional(),
+  state:              z.string().optional(),
+  zip:                z.string().optional(),
+  blood_type:         z.string().optional(),
+  primary_diagnosis:  z.string().optional(),
+  allergies_str:      z.string().optional(),
+  medical_history:    z.string().optional(),
+  notes:              z.string().optional(),
+});
+type EditPatientForm = z.infer<typeof editPatientSchema>;
 
 export default function PatientChartPage() {
   const params = useParams();
@@ -152,6 +174,55 @@ export default function PatientChartPage() {
     onError: () => toast.error('Failed to discharge patient.'),
   });
 
+  // ── Edit Patient ──────────────────────────────────────────
+  const [editOpen, setEditOpen] = useState(false);
+
+  const editForm = useForm<EditPatientForm>({
+    resolver: zodResolver(editPatientSchema),
+  });
+
+  const openEdit = () => {
+    const p = chart!.patient;
+    editForm.reset({
+      first_name:        p.first_name || '',
+      last_name:         p.last_name || '',
+      date_of_birth:     p.date_of_birth ? String(p.date_of_birth).slice(0, 10) : '',
+      gender:            p.gender || '',
+      phone:             p.phone || '',
+      email:             p.email || '',
+      address_line1:     p.address_line1 || '',
+      city:              p.city || '',
+      state:             p.state || '',
+      zip:               p.zip || '',
+      blood_type:        p.blood_type || '',
+      primary_diagnosis: p.primary_diagnosis || '',
+      allergies_str:     (p.allergies || []).join(', '),
+      medical_history:   p.medical_history || '',
+      notes:             p.notes || '',
+    });
+    setEditOpen(true);
+  };
+
+  const editMutation = useMutation({
+    mutationFn: (data: EditPatientForm) => {
+      const { allergies_str, ...rest } = data;
+      return patientService.update(id, {
+        ...(rest as any),
+        email: rest.email || undefined,
+        allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
+      });
+    },
+    onSuccess: () => {
+      refreshChart();
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      toast.success('Patient record updated ✓');
+      setEditOpen(false);
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.detail?.message || e?.message || 'Failed to update patient.'),
+  });
+
+  const onEditSubmit = (data: EditPatientForm) => editMutation.mutate(data);
+
   if (isLoading) return <PageLoader />;
   if (!chart)    return <EmptyState icon="🔍" title="Patient not found" />;
 
@@ -203,8 +274,11 @@ export default function PatientChartPage() {
               {[p.address_line1, p.city, p.state].filter(Boolean).length > 0 && (
                 <div>{[p.address_line1, p.city, p.state].filter(Boolean).join(', ')}</div>
               )}
-              {p.status === 'active' && (
-                <div className="pt-2">
+              <div className="pt-2 flex gap-2 justify-end">
+                <Button size="xs" variant="secondary" icon={<Pencil size={11} />} onClick={openEdit}>
+                  Edit Patient
+                </Button>
+                {p.status === 'active' && (
                   <Button size="xs" variant="secondary" icon={<UserMinus size={11} />}
                     loading={dischargeMut.isPending}
                     onClick={() => {
@@ -213,8 +287,8 @@ export default function PatientChartPage() {
                     }}>
                     Discharge Patient
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
           {p.allergies?.length > 0 && (
@@ -626,6 +700,100 @@ export default function PatientChartPage() {
             </select>
           </div>
           <div><label className="form-label">Notes</label><textarea className="form-textarea" rows={2} {...rvs('notes')} /></div>
+        </div>
+      </Modal>
+
+      {/* ── Edit Patient Modal ── */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Edit Patient"
+        subtitle={`${p.first_name} ${p.last_name}`}
+        size="lg"
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button variant="primary" loading={editMutation.isPending}
+              onClick={editForm.handleSubmit(onEditSubmit)}>
+              Save Changes
+            </Button>
+          </ModalFooter>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="form-label">First Name *</label>
+            <input className="form-input" {...editForm.register('first_name')} />
+            {editForm.formState.errors.first_name && (
+              <p className="text-xs text-red mt-1">{editForm.formState.errors.first_name.message}</p>
+            )}
+          </div>
+          <div>
+            <label className="form-label">Last Name *</label>
+            <input className="form-input" {...editForm.register('last_name')} />
+            {editForm.formState.errors.last_name && (
+              <p className="text-xs text-red mt-1">{editForm.formState.errors.last_name.message}</p>
+            )}
+          </div>
+          <div>
+            <label className="form-label">Date of Birth *</label>
+            <input type="date" className="form-input" {...editForm.register('date_of_birth')} />
+            {editForm.formState.errors.date_of_birth && (
+              <p className="text-xs text-red mt-1">{editForm.formState.errors.date_of_birth.message}</p>
+            )}
+          </div>
+          <div>
+            <label className="form-label">Gender</label>
+            <select className="form-select" {...editForm.register('gender')}>
+              <option value="">—</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Phone</label>
+            <input className="form-input" placeholder="(555) 000-0000" {...editForm.register('phone')} />
+          </div>
+          <div>
+            <label className="form-label">Email</label>
+            <input type="email" className="form-input" {...editForm.register('email')} />
+            {editForm.formState.errors.email && (
+              <p className="text-xs text-red mt-1">{editForm.formState.errors.email.message}</p>
+            )}
+          </div>
+          <div className="col-span-2">
+            <label className="form-label">Address</label>
+            <input className="form-input" placeholder="123 Main St" {...editForm.register('address_line1')} />
+          </div>
+          <div><label className="form-label">City</label><input className="form-input" {...editForm.register('city')} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="form-label">State</label><input className="form-input" placeholder="TX" {...editForm.register('state')} /></div>
+            <div><label className="form-label">ZIP</label><input className="form-input" {...editForm.register('zip')} /></div>
+          </div>
+          <div>
+            <label className="form-label">Blood Type</label>
+            <select className="form-select" {...editForm.register('blood_type')}>
+              <option value="">—</option>
+              {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt => <option key={bt} value={bt}>{bt}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Primary Diagnosis</label>
+            <input className="form-input" placeholder="CHF, COPD..." {...editForm.register('primary_diagnosis')} />
+          </div>
+          <div className="col-span-2">
+            <label className="form-label">Allergies (comma-separated)</label>
+            <input className="form-input" placeholder="Penicillin, Sulfa drugs..." {...editForm.register('allergies_str')} />
+          </div>
+          <div className="col-span-2">
+            <label className="form-label">Medical History</label>
+            <textarea className="form-textarea" rows={3} {...editForm.register('medical_history')} />
+          </div>
+          <div className="col-span-2">
+            <label className="form-label">Notes</label>
+            <textarea className="form-textarea" rows={2} {...editForm.register('notes')} />
+          </div>
         </div>
       </Modal>
     </>
