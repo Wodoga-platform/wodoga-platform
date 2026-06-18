@@ -10,11 +10,11 @@ import toast from 'react-hot-toast';
 import {
   ArrowLeft, Activity, Pill, Home, ClipboardList, FileText,
   Receipt, Clock, Truck, AlertTriangle, Image as ImageIcon,
-  Upload, Trash2, X as XIcon, Plus, UserMinus, Pencil,
+  Upload, Trash2, X as XIcon, Plus, UserMinus, Pencil, UserPlus, Copy,
 } from 'lucide-react';
 import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
-import { patientService, documentService, vitalsService, visitService, staffService } from '@/services';
+import { patientService, documentService, vitalsService, visitService, staffService, portalService } from '@/services';
 import {
   fmtDate, fmtTime, fmtDateTime, fmtRelative, fmtCurrency, calcAge,
   VISIT_TYPE_LABEL, PHARM_STAGE_LABEL, CLAIM_STATUS_BADGE,
@@ -223,6 +223,29 @@ export default function PatientChartPage() {
 
   const onEditSubmit = (data: EditPatientForm) => editMutation.mutate(data);
 
+  // ── Invite to Portal ──────────────────────────────────────
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const inviteMutation = useMutation({
+    mutationFn: () => portalService.invitePatient(id),
+    onSuccess: (data: any) => {
+      setInviteLink(data.setup_link);
+      setLinkCopied(false);
+      setInviteOpen(true);
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.detail?.message || e?.message || 'Could not create portal invite.'),
+  });
+
+  const copyLink = () => {
+    if (inviteLink) {
+      navigator.clipboard.writeText(inviteLink);
+      setLinkCopied(true);
+      toast.success('Link copied ✓');
+    }
+  };
+
   if (isLoading) return <PageLoader />;
   if (!chart)    return <EmptyState icon="🔍" title="Patient not found" />;
 
@@ -274,9 +297,14 @@ export default function PatientChartPage() {
               {[p.address_line1, p.city, p.state].filter(Boolean).length > 0 && (
                 <div>{[p.address_line1, p.city, p.state].filter(Boolean).join(', ')}</div>
               )}
-              <div className="pt-2 flex gap-2 justify-end">
+              <div className="pt-2 flex gap-2 justify-end flex-wrap">
                 <Button size="xs" variant="secondary" icon={<Pencil size={11} />} onClick={openEdit}>
                   Edit Patient
+                </Button>
+                <Button size="xs" variant="secondary" icon={<UserPlus size={11} />}
+                  loading={inviteMutation.isPending}
+                  onClick={() => inviteMutation.mutate()}>
+                  Invite to Portal
                 </Button>
                 {p.status === 'active' && (
                   <Button size="xs" variant="secondary" icon={<UserMinus size={11} />}
@@ -794,6 +822,36 @@ export default function PatientChartPage() {
             <label className="form-label">Notes</label>
             <textarea className="form-textarea" rows={2} {...editForm.register('notes')} />
           </div>
+        </div>
+      </Modal>
+
+      {/* ── Portal Invite Link Modal ── */}
+      <Modal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        title="Patient Portal Invite"
+        subtitle={`${p.first_name} ${p.last_name}`}
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setInviteOpen(false)}>Done</Button>
+            <Button variant="primary" icon={<Copy size={13} />} onClick={copyLink}>
+              {linkCopied ? 'Copied ✓' : 'Copy Link'}
+            </Button>
+          </ModalFooter>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-ink-2">
+            Share this secure link with the patient so they can set their password and access their portal.
+            The link expires in 72 hours.
+          </p>
+          <div className="p-3 bg-forest-ghost rounded-lg border border-surface-border break-all text-xs font-mono text-ink-2">
+            {inviteLink}
+          </div>
+          <p className="text-xs text-ink-3">
+            Tip: once email is configured, this link can be sent to the patient automatically. For now,
+            copy it and share it with them directly (text, email, or in person).
+          </p>
         </div>
       </Modal>
     </>
