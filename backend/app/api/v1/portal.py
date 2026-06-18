@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit import AuditLogger
+from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import TokenPayload
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
 
@@ -344,3 +344,143 @@ async def portal_my_documents(
         resource_type="document",
     )
     return {"data": [dict(r) for r in result.mappings().all()]}
+
+
+# ═══════════════════════════════════════════════════════════════
+# STAFF-FACING: Invite a patient to the portal
+# ═══════════════════════════════════════════════════════════════
+# These endpoints are used by STAFF (not patients) to grant a patient
+# access to the portal. They create a 'patient'-role user account linked
+# to the patient record, generate a secure set-password link, and return
+# that link for staff to share. Email delivery can be layered on later
+# (once an email service is configured) without changing this flow.
+
+from app.core.permissions import Permission, require_permissions
+from app.config import get_settings
+
+
+@router.post(
+    "/invite/{patient_id}",
+    dependencies=[Depends(require_permissions(Permission.PATIENTS_EDIT))],
+)
+async def invite_patient_to_portal(
+    patient_id: UUID,
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """
+    Grants a patient access to the patient portal.
+
+    Creates (or re-links) a 'patient'-role user account tied to this
+    patient record, generates a single-use set-password link, and returns
+    that link for staff to hand to the patient. Re-inviting regenerates
+    the link.
+    """
+    from app.core.security import generate_password_reset_token, hash_password
+    from datetime import datetime, timedelta, timezone
+    import secrets as _secrets
+
+    # 1. Load the patient and confirm they have an email (the login identifier)
+    pat_result = await db.execute(
+        text("""
+            SELECT id, first_name, last_name, email, portal_user_id
+            FROM patients
+            WHERE id = :pid AND deleted_at IS NULL
+        """),
+        {"pid": str(patient_id)},
+    )
+    patient = pat_result.mappings().first()
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": "Patient not found."},
+        )
+    if not patient["email"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "no_email",
+                    "message": "This patient needs an email address before they can be invited. "
+                               "Add one by editing the patient record first."},
+        )
+
+    # 2. Look up the 'patient' role for this organization
+    role_result = await db.execute(
+        text("SELECT id FROM roles WHERE name = 'patient' AND organization_id = :org"),
+        {"org": str(current_user.organization_id)},
+    )
+    role = role_result.mappings().first()
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "no_patient_role",
+                    "message": "No 'patient' role is configured for this organization."},
+        )
+
+    reset_token = generate_password_reset_token()
+    expires = datetime.now(timezone.utc) + timedelta(hours=72)
+
+    if patient["portal_user_id"]:
+        # Already has a portal account — just regenerate the set-password link
+        await db.execute(
+            text("""
+                UPDATE users
+                SET password_reset_token = :tok, password_reset_exp = :exp
+                WHERE id = :uid
+            """),
+            {"tok": reset_token, "exp": expires, "uid": str(patient["portal_user_id"])},
+        )
+        portal_user_id = patient["portal_user_id"]
+    else:
+        # Create a new patient-role account with a random unguessable password.
+        # The only way in is by setting a password via the link below.
+        locked_pw = hash_password(_secrets.token_urlsafe(48))
+        # Split a simple name; patient names already live on the patient record
+        user_result = await db.execute(
+            text("""
+                INSERT INTO users (
+                    organization_id, role_id, first_name, last_name, email,
+                    password_hash, is_active, is_email_verified,
+                    password_reset_token, password_reset_exp
+                ) VALUES (
+                    :org, :role, :fn, :ln, :email,
+                    :pw, TRUE, FALSE,
+                    :tok, :exp
+                ) RETURNING id
+            """),
+            {
+                "org": str(current_user.organization_id), "role": str(role["id"]),
+                "fn": patient["first_name"], "ln": patient["last_name"],
+                "email": patient["email"], "pw": locked_pw,
+                "tok": reset_token, "exp": expires,
+            },
+        )
+        portal_user_id = user_result.mappings().first()["id"]
+
+        # Link the account back to the patient record
+        await db.execute(
+            text("UPDATE patients SET portal_user_id = :uid WHERE id = :pid"),
+            {"uid": str(portal_user_id), "pid": str(patient_id)},
+        )
+
+    await db.commit()
+
+    await audit.log(
+        AuditAction.PATIENT_UPDATED,
+        f"Portal access invited for patient {patient['first_name']} {patient['last_name']}",
+        resource_type="patient", resource_id=patient_id,
+    )
+
+    # Build the set-password link pointing at the existing reset-password page
+    settings = get_settings()
+    base = settings.cors_origins[0] if settings.cors_origins else ""
+    setup_link = f"{base}/reset-password?token={reset_token}"
+
+    return {
+        "message": "Portal invite created. Share this link with the patient to set their password.",
+        "data": {
+            "setup_link": setup_link,
+            "expires_in_hours": 72,
+            "patient_email": patient["email"],
+        },
+    }
