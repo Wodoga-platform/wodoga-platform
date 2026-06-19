@@ -63,6 +63,10 @@ export default function LoginPage() {
 
       // No MFA — full login
       const tokens = res as AuthTokens;
+      if (tokens.user.role === 'patient') {
+        setError('Patient accounts must use the patient portal to sign in.');
+        return;
+      }
       setAuth(tokens.user, tokens.access_token, tokens.refresh_token);
       toast.success(`Welcome back, ${tokens.user.first_name}!`);
       router.replace('/dashboard');
@@ -99,6 +103,10 @@ export default function LoginPage() {
     setError('');
     try {
       const tokens = await authService.verifyMFA(tempToken, code);
+      if (tokens.user.role === 'patient') {
+        setError('Patient accounts must use the patient portal to sign in.');
+        return;
+      }
       setAuth(tokens.user, tokens.access_token, tokens.refresh_token);
       toast.success(`Welcome back, ${tokens.user.first_name}!`);
       router.replace('/dashboard');
