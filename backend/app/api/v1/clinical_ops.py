@@ -1060,8 +1060,8 @@ async def send_message(
         text("""
             INSERT INTO messages (
                 organization_id, sender_id, recipient_id, patient_id,
-                subject, body, is_urgent
-            ) VALUES (:org, :sender, :recipient, :patient, :subject, :body, :urgent)
+                subject, body, is_urgent, parent_message_id
+            ) VALUES (:org, :sender, :recipient, :patient, :subject, :body, :urgent, :parent)
             RETURNING id, created_at
         """),
         {
@@ -1072,6 +1072,7 @@ async def send_message(
             "subject": body.get("subject"),
             "body": body.get("body"),
             "urgent": body.get("is_urgent", False),
+            "parent": body.get("parent_message_id"),
         },
     )
     msg = result.mappings().first()
@@ -1124,6 +1125,55 @@ async def mark_read(
         resource_type="message", resource_id=message_id,
     )
     return {"message": "Marked as read."}
+
+
+@messages_router.get("/{message_id}/thread", dependencies=[Depends(require_permissions(Permission.MESSAGES_VIEW))])
+async def get_thread(
+    message_id: UUID,
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+):
+    """
+    Returns all messages in a conversation thread.
+    Walks up the parent chain to find the root, then returns all messages
+    that share the same root, ordered chronologically.
+    """
+    uid = str(current_user.user_id)
+    mid = str(message_id)
+
+    # Walk up to find the root message (the one with no parent)
+    root_id = mid
+    for _ in range(50):  # safety limit
+        row = (await db.execute(
+            text("SELECT parent_message_id FROM messages WHERE id = :id"),
+            {"id": root_id},
+        )).fetchone()
+        if not row or not row[0]:
+            break
+        root_id = str(row[0])
+
+    # Get all messages in the thread (root + all descendants)
+    result = await db.execute(
+        text("""
+            WITH RECURSIVE thread AS (
+                SELECT id FROM messages WHERE id = :root
+                UNION ALL
+                SELECT m.id FROM messages m
+                JOIN thread t ON m.parent_message_id = t.id
+            )
+            SELECT m.*,
+                   CONCAT(s.first_name, ' ', s.last_name) AS sender_name,
+                   CONCAT(r.first_name, ' ', r.last_name) AS recipient_name
+            FROM messages m
+            JOIN users s ON s.id = m.sender_id
+            JOIN users r ON r.id = m.recipient_id
+            WHERE m.id IN (SELECT id FROM thread)
+              AND (m.sender_id = :uid OR m.recipient_id = :uid)
+            ORDER BY m.created_at ASC
+        """),
+        {"root": root_id, "uid": uid},
+    )
+    return {"data": [dict(r) for r in result.mappings().all()]}
 
 
 # ════════════════════════════════════════════════════════════════
