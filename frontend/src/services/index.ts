@@ -296,8 +296,11 @@ export const messageService = {
   sent: () =>
     apiClient.get<{ data: Message[] }>('/messages', { params: { folder: 'sent' } }).then(r => r.data.data),
 
-  send: (body: { recipient_id: string; subject: string; body: string; is_urgent?: boolean }) =>
+  send: (body: { recipient_id: string; subject: string; body: string; is_urgent?: boolean; parent_message_id?: string }) =>
     apiClient.post<{ data: Message }>('/messages', body).then(r => r.data.data),
+
+  thread: (messageId: string) =>
+    apiClient.get<{ data: Message[] }>(`/messages/${messageId}/thread`).then(r => r.data.data),
 
   markRead: (id: string) =>
     apiClient.patch(`/messages/${id}/read`),
