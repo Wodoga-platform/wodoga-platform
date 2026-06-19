@@ -476,7 +476,8 @@ async def reset_password(
                 password_reset_token = NULL,
                 password_reset_exp = NULL,
                 failed_login_attempts = 0,
-                locked_until = NULL
+                locked_until = NULL,
+                is_email_verified = TRUE
             WHERE id = :id
         """),
         {"hash": new_hash, "id": str(user["id"])},
