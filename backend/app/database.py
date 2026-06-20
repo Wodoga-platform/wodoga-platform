@@ -53,6 +53,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     async with AsyncSessionLocal() as session:
         try:
+            # Clear any stale org context left by a previous get_db_for_tenant
+            # call on this pooled connection — ensures the RLS carve-out on
+            # users/roles/audit_logs works correctly for unauthenticated endpoints.
+            await session.execute(text("SELECT set_config('app.organization_id', '', false)"))
             yield session
             await session.commit()
         except Exception:
