@@ -64,7 +64,7 @@ const editPatientSchema = z.object({
   date_of_birth:      z.string().min(1, 'Required'),
   gender:             z.string().optional(),
   phone:              z.string().optional(),
-  email:              z.string().email().optional().or(z.literal('')),
+  email:              z.string().optional(),
   address_line1:      z.string().optional(),
   city:               z.string().optional(),
   state:              z.string().optional(),
