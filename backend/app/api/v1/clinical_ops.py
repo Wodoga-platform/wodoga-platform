@@ -1072,7 +1072,7 @@ async def send_message(
             "subject": body.get("subject"),
             "body": body.get("body"),
             "urgent": body.get("is_urgent", False),
-            "parent": body.get("parent_message_id"),
+            "parent": body.get("parent_message_id") or None,
         },
     )
     msg = result.mappings().first()
