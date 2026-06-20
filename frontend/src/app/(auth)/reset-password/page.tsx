@@ -48,11 +48,17 @@ function ResetForm() {
       toast.success('Password reset.');
       setTimeout(() => router.replace('/login'), 2500);
     } catch (err: any) {
-      setError(
-        err?.response?.data?.detail?.message ||
-        err?.message ||
-        'This reset link is invalid or expired. Please request a new one.'
-      );
+      const detail = err?.response?.data?.detail;
+      let msg: string;
+      if (Array.isArray(detail)) {
+        // 422 validation error from Pydantic — extract the actual message
+        msg = detail[0]?.msg?.replace('Value error, ', '') || 'Password does not meet requirements.';
+      } else if (detail?.message) {
+        msg = detail.message;
+      } else {
+        msg = err?.message || 'This reset link is invalid or expired. Please request a new one.';
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
