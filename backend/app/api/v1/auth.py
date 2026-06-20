@@ -165,7 +165,7 @@ async def login(
     # ── Account locked ────────────────────────────────────────
     if user["locked_until"] and user["locked_until"] > datetime.now(timezone.utc):
         remaining = int((user["locked_until"] - datetime.now(timezone.utc)).total_seconds() / 60)
-        await _log_failed_login(db, body.email, ip, "Account locked", user_id=user["id"])
+        await _log_failed_login(db, body.email, ip, "Account locked", user_id=user["id"], organization_id=user["organization_id"])
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail={
@@ -206,7 +206,7 @@ async def login(
                 {"a": attempts, "id": str(user["id"])},
             )
         await db.commit()
-        await _log_failed_login(db, body.email, ip, "Wrong password", user_id=user["id"])
+        await _log_failed_login(db, body.email, ip, "Wrong password", user_id=user["id"], organization_id=user["organization_id"])
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": "invalid_credentials", "message": "Invalid email or password."},
@@ -290,7 +290,7 @@ async def verify_mfa(
     from app.core.security import decrypt_field
     _secret = decrypt_field(user["mfa_secret"])
     if not verify_mfa_code(_secret, body.mfa_code):
-        await _log_failed_login(db, user["email"], ip, "Invalid MFA code", user_id=user["id"])
+        await _log_failed_login(db, user["email"], ip, "Invalid MFA code", user_id=user["id"], organization_id=user["organization_id"])
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -482,6 +482,8 @@ async def reset_password(
         """),
         {"hash": new_hash, "id": str(user["id"])},
     )
+    # Reset any stale org context from connection pooling
+    await db.execute(text("SELECT set_config('app.organization_id', '', false)"))
     await db.execute(
         text("""
             INSERT INTO audit_logs (organization_id, user_id, action, description)
@@ -675,14 +677,19 @@ async def _log_failed_login(
     ip: str,
     reason: str,
     user_id: Optional[UUID] = None,
+    organization_id: Optional[UUID] = None,
 ) -> None:
     """Records a failed login attempt in the audit log."""
+    # Reset any stale org context from connection pooling so the
+    # RLS carve-out on audit_logs allows the insert
+    await db.execute(text("SELECT set_config('app.organization_id', '', false)"))
     await db.execute(
         text("""
-            INSERT INTO audit_logs (user_id, action, description, ip_address, success, error_message, user_email)
-            VALUES (:uid, 'LOGIN_FAILED', :desc, :ip, FALSE, :reason, :email)
+            INSERT INTO audit_logs (organization_id, user_id, action, description, ip_address, success, error_message, user_email)
+            VALUES (:org, :uid, 'LOGIN_FAILED', :desc, :ip, FALSE, :reason, :email)
         """),
         {
+            "org": str(organization_id) if organization_id else None,
             "uid": str(user_id) if user_id else None,
             "desc": f"Failed login attempt for {email}",
             "ip": ip,
