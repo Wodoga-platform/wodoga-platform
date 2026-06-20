@@ -435,16 +435,19 @@ export interface OASISAssessment {
 
 // ── Message ───────────────────────────────────────────────────
 export interface Message {
-  id:             string;
-  subject:        string;
-  body:           string;
-  sender_name?:   string;
-  recipient_name?: string;
-  patient_id:     string | null;
-  is_urgent:      boolean;
-  is_read:        boolean;
-  read_at:        string | null;
-  created_at:     string;
+  id:                 string;
+  subject:            string;
+  body:               string;
+  sender_id?:         string;
+  recipient_id?:      string;
+  sender_name?:       string;
+  recipient_name?:    string;
+  patient_id:         string | null;
+  is_urgent:          boolean;
+  is_read:            boolean;
+  read_at:            string | null;
+  parent_message_id?: string | null;
+  created_at:         string;
 }
 
 // ── Staff / User ──────────────────────────────────────────────
