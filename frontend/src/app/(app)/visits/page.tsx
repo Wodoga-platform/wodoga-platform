@@ -11,7 +11,7 @@ import { visitService, patientService, staffService } from '@/services';
 import { fmtDate, fmtTime, VISIT_TYPE_LABEL, cn } from '@/utils';
 import type { Visit, VisitStatus } from '@/types';
 
-type Tab = 'scheduled' | 'completed' | 'all';
+type Tab = 'scheduled' | 'in_progress' | 'completed' | 'all';
 
 const STATUS_BADGE: Record<string, any> = {
   scheduled:   'blue',
@@ -107,9 +107,10 @@ export default function VisitsPage() {
   const visits = data?.data || [];
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'scheduled', label: 'Scheduled' },
-    { key: 'completed', label: 'Completed' },
-    { key: 'all',       label: 'All Visits' },
+    { key: 'scheduled',   label: 'Scheduled' },
+    { key: 'in_progress', label: 'In Progress' },
+    { key: 'completed',   label: 'Completed' },
+    { key: 'all',         label: 'All Visits' },
   ];
 
   return (
