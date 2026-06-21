@@ -3,14 +3,19 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, CheckCircle, ArrowUpCircle } from 'lucide-react';
 import { Button, Badge, EmptyState, Alert } from '@/components/ui';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { medicationService, patientService } from '@/services';
 import type { ReconciliationResult } from '@/types';
 
 export default function ReconciliationPage() {
   const [patientId, setPatientId] = useState('');
   const [result,    setResult]    = useState<ReconciliationResult | null>(null);
+  const [resolveOpen, setResolveOpen] = useState(false);
+  const [resolveAction, setResolveAction] = useState<'reviewed' | 'escalated'>('reviewed');
+  const [resolveNotes, setResolveNotes] = useState('');
+  const [resolved, setResolved] = useState(false);
 
   const { data: patients, isLoading: pLoading } = useQuery({
     queryKey: ['patients', 'list-simple'],
@@ -21,6 +26,7 @@ export default function ReconciliationPage() {
     mutationFn: (pid: string) => medicationService.reconcile(pid),
     onSuccess: (res) => {
       setResult(res);
+      setResolved(false);
       if (res.conflicts_found === 0) {
         toast.success('No conflicts found ✓');
       } else {
@@ -29,6 +35,25 @@ export default function ReconciliationPage() {
     },
     onError: () => toast.error('Reconciliation failed. Please try again.'),
   });
+
+  const resolveMut = useMutation({
+    mutationFn: () => medicationService.resolveReconciliation(result!.reconciliation_id, {
+      status: resolveAction,
+      resolution_notes: resolveNotes,
+    }),
+    onSuccess: () => {
+      toast.success(resolveAction === 'reviewed' ? 'Marked as reviewed ✓' : 'Escalated to prescriber ✓');
+      setResolveOpen(false);
+      setResolveNotes('');
+      setResolved(true);
+    },
+    onError: () => toast.error('Could not save. Please try again.'),
+  });
+
+  const openResolve = (action: 'reviewed' | 'escalated') => {
+    setResolveAction(action);
+    setResolveOpen(true);
+  };
 
   const selectedPatient = patients?.data.find(p => p.id === patientId);
 
@@ -136,6 +161,34 @@ export default function ReconciliationPage() {
             </Alert>
           )}
 
+          {/* Resolution actions */}
+          {resolved ? (
+            <Alert type="success" className="mb-5">
+              ✓ This reconciliation has been recorded in the patient's audit trail.
+            </Alert>
+          ) : (
+            <div className="card mb-5 p-4">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="text-sm font-bold">Clinical Review</div>
+                  <div className="text-xs text-ink-3 mt-0.5">
+                    Document your review. Mark as reviewed if addressed, or escalate if it needs prescriber/pharmacist attention.
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" icon={<CheckCircle size={14} />}
+                    onClick={() => openResolve('reviewed')}>
+                    Mark Reviewed
+                  </Button>
+                  <Button variant="primary" size="sm" icon={<ArrowUpCircle size={14} />}
+                    onClick={() => openResolve('escalated')}>
+                    Escalate
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Medication table */}
           <div className="card">
             <div className="card-header">
@@ -199,6 +252,40 @@ export default function ReconciliationPage() {
           />
         </div>
       )}
+
+      {/* Resolution modal */}
+      <Modal open={resolveOpen} onClose={() => setResolveOpen(false)}
+        title={resolveAction === 'reviewed' ? 'Mark as Reviewed' : 'Escalate Reconciliation'}
+        subtitle={resolveAction === 'reviewed'
+          ? 'Confirm you have reviewed these medications and any conflicts'
+          : 'Flag this for prescriber or pharmacist attention'}
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setResolveOpen(false)}>Cancel</Button>
+            <Button variant="primary" loading={resolveMut.isPending}
+              onClick={() => resolveMut.mutate()}>
+              {resolveAction === 'reviewed' ? 'Confirm Review' : 'Escalate'}
+            </Button>
+          </ModalFooter>
+        }>
+        <div className="space-y-3">
+          <div>
+            <label className="form-label">
+              {resolveAction === 'reviewed' ? 'Resolution Notes' : 'Reason for Escalation'}
+              {resolveAction === 'escalated' && ' *'}
+            </label>
+            <textarea className="form-textarea min-h-[100px]"
+              placeholder={resolveAction === 'reviewed'
+                ? 'e.g. Reviewed with patient, no changes needed. Conflicts assessed as clinically acceptable.'
+                : 'e.g. Warfarin + aspirin combination needs prescriber review before continuing.'}
+              value={resolveNotes}
+              onChange={e => setResolveNotes(e.target.value)} />
+          </div>
+          <div className="text-xs text-ink-3 bg-bg rounded p-3 border border-surface-borderLt">
+            This action is recorded in the patient's permanent audit trail with your name and timestamp.
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }
