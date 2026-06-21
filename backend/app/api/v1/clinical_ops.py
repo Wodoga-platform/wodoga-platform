@@ -274,6 +274,66 @@ async def run_reconciliation(
     }
 
 
+@medications_router.patch(
+    "/reconciliation/{reconciliation_id}",
+    dependencies=[Depends(require_permissions(Permission.MEDS_RECONCILE))],
+)
+async def resolve_reconciliation(
+    reconciliation_id: UUID,
+    body: dict,
+    current_user: TokenPayload = Depends(get_current_user_payload),
+    db: AsyncSession = Depends(get_db_for_tenant),
+    audit: AuditLogger = Depends(get_audit_logger),
+):
+    """
+    Reviews/resolves a medication reconciliation. A clinician can mark it
+    'reviewed' (discrepancies addressed) or 'escalated' (needs prescriber/
+    pharmacist attention), with resolution notes for the audit trail.
+    """
+    new_status = body.get("status")
+    if new_status not in ("reviewed", "escalated"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_status",
+                    "message": "Status must be 'reviewed' or 'escalated'."},
+        )
+
+    result = await db.execute(
+        text("""
+            UPDATE medication_reconciliations
+            SET status = :status,
+                resolution_notes = :notes,
+                reviewed_by = :by,
+                reviewed_at = NOW()
+            WHERE id = :id
+            RETURNING id, patient_id, status
+        """),
+        {
+            "status": new_status,
+            "notes": body.get("resolution_notes", ""),
+            "by": str(current_user.user_id),
+            "id": str(reconciliation_id),
+        },
+    )
+    updated = result.mappings().first()
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": "Reconciliation not found."},
+        )
+    await db.commit()
+
+    await audit.log(
+        AuditAction.RECONCILIATION_RUN,
+        f"Reconciliation {new_status} by clinician" +
+        (f": {body.get('resolution_notes')}" if body.get("resolution_notes") else ""),
+        patient_id=updated["patient_id"],
+        resource_type="reconciliation", resource_id=reconciliation_id,
+    )
+
+    return {"data": dict(updated), "message": f"Reconciliation marked as {new_status}."}
+
+
 # ════════════════════════════════════════════════════════════════
 # CARE PLANS
 # ════════════════════════════════════════════════════════════════
