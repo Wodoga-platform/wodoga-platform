@@ -15,6 +15,7 @@ import {
 import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, documentService, vitalsService, visitService, staffService, portalService } from '@/services';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   fmtDate, fmtTime, fmtDateTime, fmtRelative, fmtCurrency, calcAge,
   VISIT_TYPE_LABEL, PHARM_STAGE_LABEL, CLAIM_STATUS_BADGE,
@@ -430,13 +431,56 @@ export default function PatientChartPage() {
       )}
 
       {/* ── Vitals ── */}
-      {tab === 'vitals' && (
+      {tab === 'vitals' && (() => {
+        const vPoints = [...chart.vitals].reverse().map((v: any) => ({
+          date: new Date(v.recorded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          systolic: v.bp_systolic, diastolic: v.bp_diastolic,
+          heart_rate: v.heart_rate, o2_sat: v.oxygen_saturation,
+        }));
+        return (
         <div className="space-y-3">
           <div className="flex justify-end">
             <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setVitalsOpen(true)}>
               Record Vitals
             </Button>
           </div>
+
+          {/* Trend Charts */}
+          {chart.vitals.length >= 2 && (
+            <div className="card">
+              <div className="card-header"><div className="text-sm font-bold">Trends</div></div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <div className="text-xs font-semibold text-ink-3 mb-2">Blood Pressure</div>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={vPoints}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#DDE5E0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#7A877F" />
+                      <YAxis tick={{ fontSize: 11 }} stroke="#7A877F" />
+                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                      <Line type="monotone" dataKey="systolic" stroke="#1B4332" strokeWidth={2} dot={{ r: 3 }} name="Systolic" />
+                      <Line type="monotone" dataKey="diastolic" stroke="#2D6A4F" strokeWidth={2} dot={{ r: 3 }} name="Diastolic" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-ink-3 mb-2">Heart Rate &amp; O₂ Saturation</div>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={vPoints}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#DDE5E0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#7A877F" />
+                      <YAxis yAxisId="hr" tick={{ fontSize: 11 }} stroke="#7A877F" />
+                      <YAxis yAxisId="o2" orientation="right" tick={{ fontSize: 11 }} stroke="#7A877F" domain={[85, 100]} />
+                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                      <Line yAxisId="hr" type="monotone" dataKey="heart_rate" stroke="#B8860B" strokeWidth={2} dot={{ r: 3 }} name="Heart Rate" />
+                      <Line yAxisId="o2" type="monotone" dataKey="o2_sat" stroke="#E74C3C" strokeWidth={2} dot={{ r: 3 }} name="O₂ %" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="card">
           {chart.vitals.length === 0 ? <EmptyState icon="❤️" title="No vitals recorded" /> : (
             <table className="data-table">
@@ -464,7 +508,8 @@ export default function PatientChartPage() {
           )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Medications ── */}
       {tab === 'meds' && (
