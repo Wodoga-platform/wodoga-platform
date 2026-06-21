@@ -3,8 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, X, TrendingUp } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Plus, X } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Alert } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { vitalsService, patientService } from '@/services';
@@ -13,7 +12,6 @@ import { fmtDateTime, cn } from '@/utils';
 export default function VitalsPage() {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
-  const [chartPatient, setChartPatient] = useState('');
   const { register, handleSubmit, reset } = useForm();
 
   const { data: alerts = [] } = useQuery({
@@ -25,26 +23,6 @@ export default function VitalsPage() {
     queryKey: ['patients', 'list-simple'],
     queryFn:  () => patientService.list({ per_page: 100 }),
   });
-
-  const { data: chartData } = useQuery({
-    queryKey: ['vitals', 'history', chartPatient],
-    queryFn:  () => vitalsService.history(chartPatient, { limit: 30 }),
-    enabled:  !!chartPatient,
-  });
-
-  // Transform for Recharts
-  const chartPoints = (chartData?.data || [])
-    .slice().reverse() // chronological order
-    .map((v: any) => ({
-      date: new Date(v.recorded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      systolic: v.bp_systolic,
-      diastolic: v.bp_diastolic,
-      heart_rate: v.heart_rate,
-      o2_sat: v.oxygen_saturation,
-      temp: v.temperature,
-      glucose: v.blood_glucose,
-      weight: v.weight_lbs,
-    }));
 
   const dismissMut = useMutation({
     mutationFn: (id: string) => vitalsService.acknowledge(id),
@@ -118,68 +96,6 @@ export default function VitalsPage() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
-
-      {/* ── Vitals Trend Chart ── */}
-      <div className="card mt-5">
-        <div className="card-header">
-          <div className="flex items-center gap-2"><TrendingUp size={15} className="text-forest" /><span className="text-sm font-bold">Vitals Trends</span></div>
-          <div className="w-64">
-            <select className="form-select text-sm" value={chartPatient} onChange={e => setChartPatient(e.target.value)}>
-              <option value="">Select a patient...</option>
-              {patients?.data.map((p: any) => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
-            </select>
-          </div>
-        </div>
-        {!chartPatient ? (
-          <EmptyState icon="📈" title="Select a patient" description="Choose a patient above to see their vitals trends over time." />
-        ) : !chartData ? (
-          <div className="p-8 text-center text-sm text-ink-3">Loading...</div>
-        ) : chartData.data.length === 0 ? (
-          <EmptyState icon="📊" title="No vitals recorded" description="This patient has no vitals history yet." />
-        ) : (
-          <div className="p-5 space-y-5">
-            {chartData.trends && Object.keys(chartData.trends).length > 0 && (
-              <div className="flex gap-2 flex-wrap">
-                {Object.entries(chartData.trends).map(([key, dir]) => (
-                  <span key={key} className={cn(
-                    'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold',
-                    dir === 'rising' ? 'bg-red-50 text-red-700' : dir === 'falling' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'
-                  )}>
-                    {dir === 'rising' ? '↑' : dir === 'falling' ? '↓' : '→'} {key.replace(/_/g, ' ')}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div>
-              <div className="text-xs font-semibold text-ink-3 mb-2">Blood Pressure</div>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={chartPoints}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#DDE5E0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#7A877F" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#7A877F" />
-                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                  <Line type="monotone" dataKey="systolic" stroke="#1B4332" strokeWidth={2} dot={{ r: 3 }} name="Systolic" />
-                  <Line type="monotone" dataKey="diastolic" stroke="#2D6A4F" strokeWidth={2} dot={{ r: 3 }} name="Diastolic" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div>
-              <div className="text-xs font-semibold text-ink-3 mb-2">Heart Rate &amp; O₂ Saturation</div>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={chartPoints}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#DDE5E0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#7A877F" />
-                  <YAxis yAxisId="hr" tick={{ fontSize: 11 }} stroke="#7A877F" />
-                  <YAxis yAxisId="o2" orientation="right" tick={{ fontSize: 11 }} stroke="#7A877F" domain={[85, 100]} />
-                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                  <Line yAxisId="hr" type="monotone" dataKey="heart_rate" stroke="#B8860B" strokeWidth={2} dot={{ r: 3 }} name="Heart Rate" />
-                  <Line yAxisId="o2" type="monotone" dataKey="o2_sat" stroke="#E74C3C" strokeWidth={2} dot={{ r: 3 }} name="O₂ %" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
         )}
       </div>
 
