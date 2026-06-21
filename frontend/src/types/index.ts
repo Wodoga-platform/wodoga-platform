@@ -138,8 +138,10 @@ export interface Patient {
   insurance_secondary: InsuranceInfo | null;
   assigned_caregiver:  string | null;
   assigned_provider:   string | null;
+  assigned_pharmacy_staff?: string | null;
   caregiver_name?:     string | null;
   provider_name?:      string | null;
+  pharmacy_staff_name?: string | null;
   fall_risk:           FallRisk | null;
   status:              PatientStatus;
   notes:               string | null;
