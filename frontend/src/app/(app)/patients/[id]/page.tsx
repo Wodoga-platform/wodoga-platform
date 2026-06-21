@@ -75,6 +75,9 @@ const editPatientSchema = z.object({
   allergies_str:      z.string().optional(),
   medical_history:    z.string().optional(),
   notes:              z.string().optional(),
+  assigned_provider:  z.string().optional(),
+  assigned_caregiver: z.string().optional(),
+  assigned_pharmacy_staff: z.string().optional(),
 });
 type EditPatientForm = z.infer<typeof editPatientSchema>;
 
@@ -146,6 +149,16 @@ export default function PatientChartPage() {
     queryFn:  () => staffService.list('caregiver'),
   });
 
+  const { data: providers } = useQuery({
+    queryKey: ['staff', 'providers'],
+    queryFn:  () => staffService.list('provider'),
+  });
+
+  const { data: pharmacyStaff } = useQuery({
+    queryKey: ['staff', 'pharmacy_staff'],
+    queryFn:  () => staffService.list('pharmacy_staff'),
+  });
+
   const refreshChart = () => {
     qc.invalidateQueries({ queryKey: ['patient-chart', id] });
     qc.invalidateQueries({ queryKey: ['patient-timeline', id] });
@@ -200,6 +213,9 @@ export default function PatientChartPage() {
       allergies_str:     (p.allergies || []).join(', '),
       medical_history:   p.medical_history || '',
       notes:             p.notes || '',
+      assigned_provider:       p.assigned_provider || '',
+      assigned_caregiver:      p.assigned_caregiver || '',
+      assigned_pharmacy_staff: p.assigned_pharmacy_staff || '',
     });
     setEditOpen(true);
   };
@@ -211,6 +227,9 @@ export default function PatientChartPage() {
         ...(rest as any),
         email: rest.email || undefined,
         allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
+        assigned_provider:       rest.assigned_provider || null,
+        assigned_caregiver:      rest.assigned_caregiver || null,
+        assigned_pharmacy_staff: rest.assigned_pharmacy_staff || null,
       });
     },
     onSuccess: () => {
@@ -325,6 +344,13 @@ export default function PatientChartPage() {
               <AlertTriangle size={14} className="text-red" />
               <span className="font-semibold text-red">Allergies:</span>
               <span className="text-ink-2">{p.allergies.join(', ')}</span>
+            </div>
+          )}
+          {(p.provider_name?.trim() || p.caregiver_name?.trim() || p.pharmacy_staff_name?.trim()) && (
+            <div className="mt-3 flex items-center gap-4 text-xs text-ink-3 flex-wrap">
+              {p.provider_name?.trim() && <span><span className="font-semibold text-ink-2">Provider:</span> {p.provider_name}</span>}
+              {p.caregiver_name?.trim() && <span><span className="font-semibold text-ink-2">Caregiver:</span> {p.caregiver_name}</span>}
+              {p.pharmacy_staff_name?.trim() && <span><span className="font-semibold text-ink-2">Pharmacy:</span> {p.pharmacy_staff_name}</span>}
             </div>
           )}
         </div>
@@ -863,6 +889,31 @@ export default function PatientChartPage() {
             <label className="form-label">Medical History</label>
             <textarea className="form-textarea" rows={3} {...editForm.register('medical_history')} />
           </div>
+          <div className="col-span-2 pt-2 mt-1 border-t border-surface-borderLt">
+            <div className="text-xs font-bold text-ink-2 uppercase tracking-wide mb-2">Care Team Assignments</div>
+          </div>
+          <div>
+            <label className="form-label">Provider</label>
+            <select className="form-select" {...editForm.register('assigned_provider')}>
+              <option value="">— Unassigned —</option>
+              {providers?.map((s: any) => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Caregiver</label>
+            <select className="form-select" {...editForm.register('assigned_caregiver')}>
+              <option value="">— Unassigned —</option>
+              {caregivers?.map((s: any) => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Pharmacy Staff</label>
+            <select className="form-select" {...editForm.register('assigned_pharmacy_staff')}>
+              <option value="">— Unassigned —</option>
+              {pharmacyStaff?.map((s: any) => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
+            </select>
+          </div>
+          <div></div>
           <div className="col-span-2">
             <label className="form-label">Notes</label>
             <textarea className="form-textarea" rows={2} {...editForm.register('notes')} />
