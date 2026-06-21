@@ -1,13 +1,20 @@
 'use client';
 /** Wodoga — Patient Portal Dashboard */
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth.store';
 import { portalService } from '@/services';
-import { Badge, PageLoader, EmptyState } from '@/components/ui';
+import { Badge, PageLoader, EmptyState, Button } from '@/components/ui';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { fmtDate, fmtTime, VISIT_TYPE_LABEL, cn } from '@/utils';
 
 export default function PortalDashboard() {
   const { user, signOut } = useAuthStore();
+  const qc = useQueryClient();
+  const [msgOpen, setMsgOpen] = useState(false);
+  const { register, handleSubmit, reset } = useForm();
 
   const { data: profile,   isLoading: pl } = useQuery({ queryKey: ['portal','profile'],  queryFn: portalService.myProfile  });
   const { data: visits }                   = useQuery({ queryKey: ['portal','visits'],   queryFn: portalService.myVisits    });
@@ -15,6 +22,17 @@ export default function PortalDashboard() {
   const { data: vitals }                   = useQuery({ queryKey: ['portal','vitals'],   queryFn: portalService.myVitals    });
   const { data: carePlan }                 = useQuery({ queryKey: ['portal','careplan'], queryFn: portalService.myCarePlan  });
   const { data: messages }                 = useQuery({ queryKey: ['portal','messages'], queryFn: portalService.myMessages  });
+
+  const sendMsg = useMutation({
+    mutationFn: (body: { subject: string; body: string }) => portalService.sendMessage(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['portal', 'messages'] });
+      toast.success('Message sent to your care team ✓');
+      setMsgOpen(false);
+      reset();
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.detail?.message || 'Could not send message.'),
+  });
 
   if (pl) return <PageLoader />;
 
@@ -126,7 +144,10 @@ export default function PortalDashboard() {
           <div className="card">
             <div className="card-header">
               <div className="text-sm font-bold">Messages from Care Team</div>
-              {unread > 0 && <Badge variant="red">{unread} new</Badge>}
+              <div className="flex items-center gap-2">
+                {unread > 0 && <Badge variant="red">{unread} new</Badge>}
+                <Button size="xs" variant="primary" onClick={() => setMsgOpen(true)}>Message Care Team</Button>
+              </div>
             </div>
             {!messages?.length ? <EmptyState icon="💬" title="No messages" /> : (
               <div className="divide-y divide-surface-borderLt">
@@ -164,6 +185,32 @@ export default function PortalDashboard() {
           )}
         </div>
       </div>
+
+      {/* Compose message modal */}
+      <Modal open={msgOpen} onClose={() => { setMsgOpen(false); reset(); }}
+        title="Message Your Care Team"
+        subtitle="Your message goes securely to your assigned provider"
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => { setMsgOpen(false); reset(); }}>Cancel</Button>
+            <Button variant="primary" loading={sendMsg.isPending}
+              onClick={handleSubmit((d: any) => sendMsg.mutate(d))}>Send Message 🔒</Button>
+          </ModalFooter>
+        }>
+        <div className="space-y-3">
+          <div>
+            <label className="form-label">Subject</label>
+            <input className="form-input" placeholder="What is your message about?" {...register('subject', { required: true })} />
+          </div>
+          <div>
+            <label className="form-label">Message</label>
+            <textarea className="form-textarea min-h-[120px]" placeholder="Type your message here..." {...register('body', { required: true })} />
+          </div>
+          <div className="text-xs text-ink-3 bg-bg rounded p-3 border border-surface-borderLt">
+            🔒 This message is private and secure. For medical emergencies, call 911 — do not use this message system.
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
