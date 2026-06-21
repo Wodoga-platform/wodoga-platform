@@ -183,6 +183,9 @@ export const medicationService = {
     apiClient.post<{ data: ReconciliationResult }>('/medications/reconciliation', null, {
       params: { patient_id: patientId },
     }).then(r => r.data.data),
+
+  resolveReconciliation: (reconciliationId: string, body: { status: 'reviewed' | 'escalated'; resolution_notes?: string }) =>
+    apiClient.patch(`/medications/reconciliation/${reconciliationId}`, body).then(r => r.data),
 };
 
 // ════════════════════════════════════════════════════════════
