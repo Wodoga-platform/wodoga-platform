@@ -81,8 +81,8 @@ class Settings(BaseSettings):
     rate_limit_eligibility: str = "30/minute"
 
     # ── Security ────────────────────────────────────────────
-    max_login_attempts: int = 5
-    account_lockout_minutes: int = 30
+    max_login_attempts: int = 7
+    account_lockout_minutes: int = 5
     password_min_length: int = 10
     session_timeout_minutes: int = 30
 
