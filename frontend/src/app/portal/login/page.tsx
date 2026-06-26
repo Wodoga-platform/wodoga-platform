@@ -52,7 +52,14 @@ export default function PortalLoginPage() {
       toast.success(`Welcome, ${tokens.user.first_name}!`);
       router.replace('/portal/dashboard');
     } catch (err: any) {
-      setError(err?.message || 'Invalid email or password.');
+      // Same three failure modes as staff login.
+      if (err?.error === 'rate_limited') {
+        setError('Too many login attempts from your network. Please wait a minute and try again.');
+      } else if (err?.error === 'account_locked') {
+        setError(err.message || 'This account is temporarily locked due to repeated failed attempts. Please wait a few minutes or use "Forgot password" to reset.');
+      } else {
+        setError('Invalid email or password.');
+      }
     } finally { setLoading(false); }
   };
 
