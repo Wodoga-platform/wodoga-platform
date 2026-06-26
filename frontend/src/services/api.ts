@@ -100,6 +100,14 @@ apiClient.interceptors.response.use(
     }
 
     // ── Structure the error for consistent handling ───────────
+    // 429 responses from slowapi come as plain text, not JSON, so detect
+    // them by status code and synthesize the structured shape.
+    if (error.response?.status === 429) {
+      return Promise.reject({
+        error: 'rate_limited',
+        message: 'Too many login attempts from your network. Please wait a minute and try again.',
+      } as ApiError);
+    }
     const apiError: ApiError = error.response?.data || {
       error: 'network_error',
       message: 'Network error. Please check your connection.',
