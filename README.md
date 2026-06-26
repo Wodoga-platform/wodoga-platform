@@ -1,110 +1,157 @@
-# Wodoga Platform
+"""
+Wodoga Platform — Alembic Environment
 
-Home Health & Pharmaceutical Operations SaaS Platform.
+This file is loaded by Alembic whenever a migration command is run. It controls
+how Alembic connects to the database and how migrations are executed.
 
-## Project Structure
+KEY DESIGN DECISIONS (read these before changing anything):
 
-```
-wodoga/
-├── database/               ← PostgreSQL schema and seed data
-│   ├── schema.sql          Start here — creates all 21 tables
-│   ├── seed.sql            Demo organization, roles, and staff
-│   └── README.md           Table reference and setup instructions
-│
-├── backend/                ← FastAPI Python server
-│   ├── app/
-│   │   ├── main.py         Application entry point — all routers registered
-│   │   ├── config.py       Settings loaded from .env
-│   │   ├── database.py     Database connection and tenant context
-│   │   ├── dependencies.py Shared FastAPI dependencies (auth, audit)
-│   │   ├── api/v1/
-│   │   │   ├── auth.py         Login, MFA, refresh, logout
-│   │   │   ├── patients.py     Patient CRUD and summary
-│   │   │   ├── visits.py       Scheduling, GPS, SOAP notes
-│   │   │   ├── vitals.py       Vital signs and clinical alerts
-│   │   │   ├── eligibility.py  Insurance verification
-│   │   │   ├── clinical_ops.py Medications, billing, referrals, messages, staff, audit
-│   │   │   └── portal.py       Patient portal endpoints
-│   │   └── core/
-│   │       ├── security.py     JWT, bcrypt, MFA, encryption
-│   │       ├── permissions.py  RBAC constants and checker
-│   │       ├── audit.py        Immutable audit logging
-│   │       └── exceptions.py   Domain exceptions
-│   ├── requirements.txt    Python dependencies
-│   ├── .env.example        Copy to .env and fill in values
-│   └── README.md           Backend setup and API reference
-│
-├── frontend/               ← Next.js 14 React TypeScript app
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── layout.tsx              Root layout
-│   │   │   ├── (auth)/login/           Login + 2FA page
-│   │   │   ├── (app)/                  All staff pages (requires login)
-│   │   │   │   ├── dashboard/          Overview and stats
-│   │   │   │   ├── patients/           Patient records
-│   │   │   │   ├── visits/             Home visits
-│   │   │   │   ├── vitals/             Vital signs
-│   │   │   │   ├── medications/        Prescriptions
-│   │   │   │   ├── care-plans/         Care plan builder
-│   │   │   │   ├── referrals/          Referral pipeline
-│   │   │   │   ├── billing/            Insurance claims
-│   │   │   │   ├── eligibility/        Coverage verification
-│   │   │   │   ├── pharm-orders/       Pharmaceutical orders
-│   │   │   │   ├── messages/           Secure messaging
-│   │   │   │   ├── oasis/              OASIS assessments
-│   │   │   │   ├── staff/              Staff management
-│   │   │   │   ├── audit/              Audit log
-│   │   │   │   └── notifications/      Notification center
-│   │   │   └── portal/
-│   │   │       ├── login/              Patient portal login
-│   │   │       └── dashboard/          Patient portal home
-│   │   ├── components/
-│   │   │   ├── layout/AppLayout.tsx    Topbar + sidebar
-│   │   │   └── ui/                     Badge, Button, Modal, etc.
-│   │   ├── services/
-│   │   │   ├── api.ts                  Axios client + token refresh
-│   │   │   └── index.ts                All API service functions
-│   │   ├── store/auth.store.ts         Zustand auth state
-│   │   ├── types/index.ts              TypeScript types
-│   │   ├── utils/index.ts              Helpers and formatters
-│   │   └── styles/globals.css          Tailwind + design tokens
-│   ├── package.json
-│   ├── tailwind.config.js
-│   ├── tsconfig.json
-│   ├── next.config.js
-│   ├── .env.local.example  Copy to .env.local and fill in values
-│   └── README.md           Frontend setup instructions
-│
-├── SETUP_GUIDE.md          ← START HERE — plain English setup for non-developers
-├── PLATFORM_RUNDOWN.md     Full feature list, third-party connections, priority order
-└── README.md               This file
-```
+1. NO ORM MODELS. Wodoga is a raw-SQL codebase. We deliberately do NOT import
+   any SQLAlchemy models and we set `target_metadata = None`. This DISABLES
+   autogenerate — which is correct for us. Autogenerate would compare empty
+   metadata to the live database and try to drop every table.
 
-## Quick Start
+2. SYNC DRIVER FOR MIGRATIONS. The app uses asyncpg, but Alembic runs migrations
+   synchronously. We rewrite the URL from `postgresql+asyncpg://...` to
+   `postgresql+psycopg2://...` so the standard sync flow works. psycopg2-binary
+   is already in requirements.txt.
 
-Read `SETUP_GUIDE.md` first. It walks through every step in plain English.
+3. SEPARATE OWNER CREDENTIALS. The runtime `wodoga_app` role intentionally
+   does NOT have DDL permissions (this is by design — see schema.sql). Alembic
+   migrations MUST run as a role that owns the tables, normally the postgres
+   superuser. We read this from `ALEMBIC_DATABASE_URL`. We fall back to
+   `DATABASE_URL` ONLY if ALEMBIC_DATABASE_URL is unset (which should only
+   happen in local development against a dev DB where the app role owns
+   everything).
 
-**Minimum to get running locally:**
-1. Install Node.js, Python, PostgreSQL, Git
-2. Run `database/schema.sql` and `database/seed.sql`
-3. Configure `backend/.env`
-4. Start backend: `uvicorn app.main:app --reload`
-5. Configure `frontend/.env.local`
-6. Start frontend: `npm run dev`
-7. Open http://localhost:3000
+4. SAFETY LOGGING. Every migration command logs which database it's about to
+   touch (host, db name, role) BEFORE running. This is intentional friction —
+   if you see the wrong target, hit Ctrl+C.
+"""
 
-**Demo login:** `s.johnson@arlingtonhh.com` / `Demo1234!`
+from __future__ import annotations
 
-## Tech Stack
+import os
+import sys
+import logging
+from logging.config import fileConfig
+from pathlib import Path
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14, TypeScript, TailwindCSS, React Query, Zustand |
-| Backend | FastAPI (Python), SQLAlchemy, Pydantic |
-| Database | PostgreSQL 15 with Row Level Security |
-| Auth | JWT + TOTP MFA (Google Authenticator compatible) |
-| Cloud | Microsoft Azure (App Service + PostgreSQL + Blob Storage) |
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine.url import make_url
 
-## License
+# Make `app` importable so we can read settings from a single source of truth
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-Proprietary. All rights reserved.
+# Alembic Config object
+config = context.config
+
+# Set up logging from alembic.ini
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+log = logging.getLogger("alembic.env")
+
+# NO MODELS. This intentionally disables autogenerate.
+target_metadata = None
+
+
+def _resolve_database_url() -> str:
+    """
+    Pick the right database URL for migrations, with safety logging.
+
+    Precedence:
+      1. ALEMBIC_DATABASE_URL  (owner credentials — required for production)
+      2. DATABASE_URL          (only acceptable in local dev where app role
+                                  owns everything)
+
+    Always rewrites asyncpg → psycopg2 for sync migration execution.
+    """
+    url = os.environ.get("ALEMBIC_DATABASE_URL")
+    using_runtime_url = False
+    if not url:
+        url = os.environ.get("DATABASE_URL")
+        using_runtime_url = True
+        if not url:
+            raise RuntimeError(
+                "No database URL found. Set ALEMBIC_DATABASE_URL (preferred, "
+                "with owner credentials) or DATABASE_URL (local dev only)."
+            )
+
+    # Rewrite asyncpg → psycopg2 so the sync Alembic flow works
+    if "+asyncpg" in url:
+        url = url.replace("+asyncpg", "+psycopg2")
+    elif url.startswith("postgresql://") or url.startswith("postgres://"):
+        # Plain postgres:// URLs work with psycopg2 by default
+        url = url.replace("postgres://", "postgresql://", 1) if url.startswith("postgres://") else url
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+    # SAFETY LOGGING — print the target before we run anything
+    parsed = make_url(url)
+    log.info("=" * 60)
+    log.info("ALEMBIC TARGET DATABASE")
+    log.info("  Host:  %s", parsed.host)
+    log.info("  Port:  %s", parsed.port)
+    log.info("  DB:    %s", parsed.database)
+    log.info("  Role:  %s", parsed.username)
+    log.info("  Via:   %s", "ALEMBIC_DATABASE_URL" if not using_runtime_url else "DATABASE_URL (fallback)")
+    if using_runtime_url:
+        log.warning("Falling back to DATABASE_URL — fine for local dev only.")
+    log.info("=" * 60)
+
+    return url
+
+
+def run_migrations_offline() -> None:
+    """
+    Run migrations in 'offline' mode — emits SQL to a script instead of
+    executing it. Useful for reviewing exactly what will run, and for
+    environments where you want a DBA to apply the SQL manually.
+
+    Usage: `alembic upgrade head --sql`
+    """
+    url = _resolve_database_url()
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        # For raw-SQL projects, transactional DDL is what we want — each
+        # migration is its own transaction.
+        transaction_per_migration=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    """
+    Run migrations in 'online' mode — connects to the database and applies them.
+    """
+    url = _resolve_database_url()
+
+    # Build engine config from alembic.ini settings, overriding the URL
+    cfg_section = config.get_section(config.config_ini_section, {})
+    cfg_section["sqlalchemy.url"] = url
+
+    connectable = engine_from_config(
+        cfg_section,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,  # Don't pool — migrations are one-shot
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            transaction_per_migration=True,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
