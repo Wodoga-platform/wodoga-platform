@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 import { Search, Plus, Upload } from 'lucide-react';
 import {
   Button, Badge, Avatar, EmptyState, PageLoader,
-  StatCard, InfoField, Alert,
+  StatCard, InfoField, Alert, Gated,
 } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, visitService, medicationService } from '@/services';
@@ -145,12 +145,14 @@ export default function PatientsPage() {
               if (csvInputRef.current) csvInputRef.current.value = '';
             }}
           />
-          <Button variant="secondary" size="sm" icon={<Upload size={13} />}
-            loading={importMutation.isPending}
-            onClick={() => csvInputRef.current?.click()}>Import CSV</Button>
-          <Button variant="primary"   size="sm" icon={<Plus   size={13} />} onClick={() => setCreateOpen(true)}>
-            New Patient
-          </Button>
+          <Gated permission="patients:create">
+            <Button variant="secondary" size="sm" icon={<Upload size={13} />}
+              loading={importMutation.isPending}
+              onClick={() => csvInputRef.current?.click()}>Import CSV</Button>
+            <Button variant="primary"   size="sm" icon={<Plus   size={13} />} onClick={() => setCreateOpen(true)}>
+              New Patient
+            </Button>
+          </Gated>
         </div>
       </div>
 
@@ -192,7 +194,11 @@ export default function PatientsPage() {
                 icon="👥"
                 title="No patients found"
                 description={search ? `No results for "${search}"` : 'Add your first patient to get started.'}
-                action={<Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>Add Patient</Button>}
+                action={
+                  <Gated permission="patients:create">
+                    <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>Add Patient</Button>
+                  </Gated>
+                }
               />
             ) : (
               <>
@@ -346,12 +352,18 @@ export default function PatientsPage() {
                       </div>
                     )}
                     <div className="flex gap-2 pt-2 border-t border-surface-border">
-                      <Button size="xs" variant="primary" className="flex-1">+ Schedule Visit</Button>
-                      <Button size="xs" variant="secondary">+ Vitals</Button>
-                      <Button size="xs" variant="danger"
-                        onClick={() => confirm('Delete this patient record? This cannot be undone.') && deleteMutation.mutate(selected.id)}>
-                        Delete
-                      </Button>
+                      <Gated permission="visits:create">
+                        <Button size="xs" variant="primary" className="flex-1">+ Schedule Visit</Button>
+                      </Gated>
+                      <Gated permission="vitals:create">
+                        <Button size="xs" variant="secondary">+ Vitals</Button>
+                      </Gated>
+                      <Gated permission="patients:delete">
+                        <Button size="xs" variant="danger"
+                          onClick={() => confirm('Delete this patient record? This cannot be undone.') && deleteMutation.mutate(selected.id)}>
+                          Delete
+                        </Button>
+                      </Gated>
                     </div>
                   </div>
                 )}
