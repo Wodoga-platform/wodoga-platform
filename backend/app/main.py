@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -100,7 +99,24 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _structured_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """
+    Return rate-limit responses in the same {error, message} shape the rest of
+    the app uses, so the frontend can read it consistently. The default slowapi
+    handler returns plain text, which the API client can't parse uniformly.
+    """
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "rate_limited",
+            "message": "Too many login attempts from your network. Please wait a minute and try again.",
+        },
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _structured_rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
