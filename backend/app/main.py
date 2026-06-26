@@ -11,7 +11,6 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.limiter import limiter
 
@@ -117,7 +116,6 @@ async def _structured_rate_limit_handler(request: Request, exc: RateLimitExceede
 
 
 app.add_exception_handler(RateLimitExceeded, _structured_rate_limit_handler)
-app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
