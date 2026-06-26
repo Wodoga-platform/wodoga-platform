@@ -71,9 +71,14 @@ export default function LoginPage() {
       toast.success(`Welcome back, ${tokens.user.first_name}!`);
       router.replace('/dashboard');
     } catch (err: any) {
-      const msg = err?.message || 'Invalid email or password.';
-      if (err?.error === 'account_locked') {
-        setError(msg);
+      // Three distinct failure modes with distinct user actions:
+      //   - rate_limited: too many attempts from this IP, wait and retry
+      //   - account_locked: this specific account is locked, wait or use "Forgot password"
+      //   - anything else: assume wrong credentials (don't leak whether email exists)
+      if (err?.error === 'rate_limited') {
+        setError('Too many login attempts from your network. Please wait a minute and try again.');
+      } else if (err?.error === 'account_locked') {
+        setError(err.message || 'This account is temporarily locked due to repeated failed attempts. Please wait a few minutes or use "Forgot password" to reset.');
       } else {
         setError('Invalid email or password.');
       }
