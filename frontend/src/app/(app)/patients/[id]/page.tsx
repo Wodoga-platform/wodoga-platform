@@ -12,7 +12,7 @@ import {
   Receipt, Clock, Truck, AlertTriangle, Image as ImageIcon,
   Upload, Trash2, X as XIcon, Plus, UserMinus, Pencil, UserPlus, Copy,
 } from 'lucide-react';
-import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField } from '@/components/ui';
+import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, documentService, vitalsService, visitService, staffService, portalService } from '@/services';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -318,23 +318,29 @@ export default function PatientChartPage() {
                 <div>{[p.address_line1, p.city, p.state].filter(Boolean).join(', ')}</div>
               )}
               <div className="pt-2 flex gap-2 justify-end flex-wrap">
-                <Button size="xs" variant="secondary" icon={<Pencil size={11} />} onClick={openEdit}>
-                  Edit Patient
-                </Button>
-                <Button size="xs" variant="secondary" icon={<UserPlus size={11} />}
-                  loading={inviteMutation.isPending}
-                  onClick={() => inviteMutation.mutate()}>
-                  Invite to Portal
-                </Button>
-                {p.status === 'active' && (
-                  <Button size="xs" variant="secondary" icon={<UserMinus size={11} />}
-                    loading={dischargeMut.isPending}
-                    onClick={() => {
-                      if (confirm(`Discharge ${p.first_name} ${p.last_name}? This marks the patient as discharged.`))
-                        dischargeMut.mutate();
-                    }}>
-                    Discharge Patient
+                <Gated permission="patients:edit">
+                  <Button size="xs" variant="secondary" icon={<Pencil size={11} />} onClick={openEdit}>
+                    Edit Patient
                   </Button>
+                </Gated>
+                <Gated permission="patients:edit">
+                  <Button size="xs" variant="secondary" icon={<UserPlus size={11} />}
+                    loading={inviteMutation.isPending}
+                    onClick={() => inviteMutation.mutate()}>
+                    Invite to Portal
+                  </Button>
+                </Gated>
+                {p.status === 'active' && (
+                  <Gated permission="patients:edit">
+                    <Button size="xs" variant="secondary" icon={<UserMinus size={11} />}
+                      loading={dischargeMut.isPending}
+                      onClick={() => {
+                        if (confirm(`Discharge ${p.first_name} ${p.last_name}? This marks the patient as discharged.`))
+                          dischargeMut.mutate();
+                      }}>
+                      Discharge Patient
+                    </Button>
+                  </Gated>
                 )}
               </div>
             </div>
