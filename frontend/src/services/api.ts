@@ -108,7 +108,11 @@ apiClient.interceptors.response.use(
         message: 'Too many login attempts from your network. Please wait a minute and try again.',
       } as ApiError);
     }
-    const apiError: ApiError = error.response?.data || {
+    // FastAPI's HTTPException wraps the body under `detail`. Unwrap it so
+    // every error has the same {error, message} shape downstream.
+    const raw = error.response?.data;
+    const unwrapped = raw?.detail && typeof raw.detail === 'object' ? raw.detail : raw;
+    const apiError: ApiError = unwrapped || {
       error: 'network_error',
       message: 'Network error. Please check your connection.',
     };
