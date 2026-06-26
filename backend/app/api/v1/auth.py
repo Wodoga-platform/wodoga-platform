@@ -43,6 +43,7 @@ from app.core.security import (
 from app.database import get_db
 from app.dependencies import get_audit_logger, get_client_ip, get_current_user_payload
 from app.core.permissions import TokenPayload
+from app.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
@@ -118,6 +119,7 @@ class MFASetupResponse(BaseModel):
 
 # ── Login ─────────────────────────────────────────────────────
 @router.post("/login", response_model=dict)
+@limiter.limit("5/minute")
 async def login(
     request: Request,
     body: LoginRequest,
@@ -246,6 +248,7 @@ async def login(
 
 # ── MFA Verification ──────────────────────────────────────────
 @router.post("/verify-mfa", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def verify_mfa(
     request: Request,
     body: MFAVerifyRequest,
@@ -384,7 +387,9 @@ async def logout(
 
 # ── Forgot Password (request a reset link) ────────────────────
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
+@limiter.limit("3/minute")
 async def forgot_password(
+    request: Request,
     body: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -434,7 +439,9 @@ async def forgot_password(
 
 # ── Reset Password (consume the link) ─────────────────────────
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def reset_password(
+    request: Request,
     body: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ):
