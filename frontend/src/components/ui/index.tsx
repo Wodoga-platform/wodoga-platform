@@ -287,3 +287,44 @@ export function Alert({
     </div>
   );
 }
+
+// ════════════════════════════════════════════════════════════
+// GATED
+// Render children only if the current user has the required permission(s).
+// Use this to hide buttons, links, or sections that lead to actions the
+// user cannot perform. This is a UX affordance, NOT a security control —
+// the backend still enforces every action via require_permissions().
+//
+//   <Gated permission="patients:create">
+//     <Button>Add Patient</Button>
+//   </Gated>
+//
+//   <Gated anyOf={['billing:create', 'billing:update']}>
+//     <Button>Edit Claim</Button>
+//   </Gated>
+//
+// Pass `fallback` to render an alternative (e.g. a disabled button with a
+// tooltip). Defaults to rendering nothing.
+// ════════════════════════════════════════════════════════════
+import type { Permission } from '@/types';
+import { useAuthStore } from '@/store/auth.store';
+
+interface GatedProps {
+  permission?: Permission;
+  anyOf?: Permission[];
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+export function Gated({ permission, anyOf, children, fallback = null }: GatedProps) {
+  const hasPermission    = useAuthStore(s => s.hasPermission);
+  const hasAnyPermission = useAuthStore(s => s.hasAnyPermission);
+
+  const allowed = permission
+    ? hasPermission(permission)
+    : anyOf
+    ? hasAnyPermission(...anyOf)
+    : true; // No constraint provided — render unchanged (developer error guard)
+
+  return <>{allowed ? children : fallback}</>;
+}
