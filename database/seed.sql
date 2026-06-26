@@ -135,7 +135,7 @@ INSERT INTO roles (id, organization_id, name, display_name, permissions) VALUES
 ('b0000000-0000-0000-0000-000000000006',
  'a0000000-0000-0000-0000-000000000001',
  'caregiver', 'Caregiver / CNA',
- '["patients:view","patients:edit",
+ '["patients:view",
    "intake_forms:create","intake_forms:view",
    "visits:view","visits:create","visits:checkin","visits:soap_note",
    "vitals:view","vitals:create",
