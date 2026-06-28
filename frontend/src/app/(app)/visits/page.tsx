@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, MapPin, X } from 'lucide-react';
-import { Button, Badge, Avatar, EmptyState, PageLoader, InfoField } from '@/components/ui';
+import { Button, Badge, Avatar, EmptyState, PageLoader, InfoField, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { visitService, patientService, staffService } from '@/services';
 import { fmtDate, fmtTime, VISIT_TYPE_LABEL, cn } from '@/utils';
@@ -120,9 +120,11 @@ export default function VisitsPage() {
           <h1 className="page-title">Home Visits</h1>
           <p className="page-subtitle">Schedule, document, and track all caregiver visits</p>
         </div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setSchedOpen(true)}>
-          Schedule Visit
-        </Button>
+        <Gated permission="visits:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setSchedOpen(true)}>
+            Schedule Visit
+          </Button>
+        </Gated>
       </div>
 
       {/* Tabs */}
@@ -147,7 +149,11 @@ export default function VisitsPage() {
           <div className="card">
             {isLoading ? <PageLoader /> : visits.length === 0 ? (
               <EmptyState icon="🏠" title={`No ${tab} visits`}
-                action={<Button variant="primary" size="sm" onClick={() => setSchedOpen(true)}>Schedule Visit</Button>}
+                action={
+                  <Gated permission="visits:create">
+                    <Button variant="primary" size="sm" onClick={() => setSchedOpen(true)}>Schedule Visit</Button>
+                  </Gated>
+                }
               />
             ) : (
               <table className="data-table">
@@ -188,20 +194,26 @@ export default function VisitsPage() {
                       <td onClick={e => e.stopPropagation()}>
                         <div className="flex gap-1.5">
                           {v.status === 'scheduled' && !v.checkin_at && (
-                            <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
-                              onClick={() => handleCheckin(v)}>
-                              Check In
-                            </Button>
+                            <Gated permission="visits:checkin">
+                              <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
+                                onClick={() => handleCheckin(v)}>
+                                Check In
+                              </Button>
+                            </Gated>
                           )}
                           {(v.status === 'scheduled' || v.status === 'in_progress') && (
-                            <Button size="xs" variant="primary" onClick={() => setSoapVisit(v)}>
-                              Document
-                            </Button>
+                            <Gated permission="visits:soap_note">
+                              <Button size="xs" variant="primary" onClick={() => setSoapVisit(v)}>
+                                Document
+                              </Button>
+                            </Gated>
                           )}
                           {v.status === 'completed' && !v.has_soap_note && (
-                            <Button size="xs" variant="amber" onClick={() => setSoapVisit(v)}>
-                              Add SOAP
-                            </Button>
+                            <Gated permission="visits:soap_note">
+                              <Button size="xs" variant="amber" onClick={() => setSoapVisit(v)}>
+                                Add SOAP
+                              </Button>
+                            </Gated>
                           )}
                         </div>
                       </td>
@@ -311,46 +323,60 @@ export default function VisitsPage() {
                     {selected.status === 'scheduled' && (
                       <>
                         {!selected.checkin_at && (
-                          <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
-                            loading={checkinMut.isPending}
-                            onClick={() => handleCheckin(selected)}>
-                            GPS Check In
-                          </Button>
+                          <Gated permission="visits:checkin">
+                            <Button size="xs" variant="secondary" icon={<MapPin size={11} />}
+                              loading={checkinMut.isPending}
+                              onClick={() => handleCheckin(selected)}>
+                              GPS Check In
+                            </Button>
+                          </Gated>
                         )}
-                        <Button size="xs" variant="primary"
-                          onClick={() => setSoapVisit(selected)}>
-                          Document Visit
-                        </Button>
-                        <Button size="xs" variant="secondary"
-                          loading={updateMut.isPending}
-                          onClick={() => updateMut.mutate({ id: selected.id, status: 'missed' })}>
-                          Mark Missed
-                        </Button>
-                        <Button size="xs" className="bg-red-ghost text-red border border-red-pale"
-                          loading={updateMut.isPending}
-                          onClick={() => updateMut.mutate({ id: selected.id, status: 'cancelled' })}>
-                          Cancel Visit
-                        </Button>
+                        <Gated permission="visits:soap_note">
+                          <Button size="xs" variant="primary"
+                            onClick={() => setSoapVisit(selected)}>
+                            Document Visit
+                          </Button>
+                        </Gated>
+                        <Gated permission="visits:edit">
+                          <Button size="xs" variant="secondary"
+                            loading={updateMut.isPending}
+                            onClick={() => updateMut.mutate({ id: selected.id, status: 'missed' })}>
+                            Mark Missed
+                          </Button>
+                        </Gated>
+                        <Gated permission="visits:edit">
+                          <Button size="xs" className="bg-red-ghost text-red border border-red-pale"
+                            loading={updateMut.isPending}
+                            onClick={() => updateMut.mutate({ id: selected.id, status: 'cancelled' })}>
+                            Cancel Visit
+                          </Button>
+                        </Gated>
                       </>
                     )}
                     {selected.status === 'in_progress' && (
                       <>
-                        <Button size="xs" variant="primary"
-                          onClick={() => setSoapVisit(selected)}>
-                          Document & Complete
-                        </Button>
-                        <Button size="xs" variant="secondary"
-                          loading={updateMut.isPending}
-                          onClick={() => updateMut.mutate({ id: selected.id, status: 'completed' })}>
-                          Mark Completed
-                        </Button>
+                        <Gated permission="visits:soap_note">
+                          <Button size="xs" variant="primary"
+                            onClick={() => setSoapVisit(selected)}>
+                            Document & Complete
+                          </Button>
+                        </Gated>
+                        <Gated permission="visits:edit">
+                          <Button size="xs" variant="secondary"
+                            loading={updateMut.isPending}
+                            onClick={() => updateMut.mutate({ id: selected.id, status: 'completed' })}>
+                            Mark Completed
+                          </Button>
+                        </Gated>
                       </>
                     )}
                     {selected.status === 'completed' && !selected.has_soap_note && (
-                      <Button size="xs" variant="amber"
-                        onClick={() => setSoapVisit(selected)}>
-                        Add SOAP Note
-                      </Button>
+                      <Gated permission="visits:soap_note">
+                        <Button size="xs" variant="amber"
+                          onClick={() => setSoapVisit(selected)}>
+                          Add SOAP Note
+                        </Button>
+                      </Gated>
                     )}
                     {selected.status === 'completed' && selected.has_soap_note && (
                       <Button size="xs" variant="secondary"
