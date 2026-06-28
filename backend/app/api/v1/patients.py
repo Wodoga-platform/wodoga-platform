@@ -497,7 +497,7 @@ async def delete_patient(
         Depends(require_any_permission(
             Permission.VISITS_VIEW,
             Permission.VITALS_VIEW,
-            Permission.MEDICATIONS_VIEW,
+            Permission.MEDS_VIEW,
         )),
     ],
 )
@@ -601,7 +601,7 @@ async def get_patient_summary(
         Depends(require_any_permission(
             Permission.VISITS_VIEW,
             Permission.VITALS_VIEW,
-            Permission.MEDICATIONS_VIEW,
+            Permission.MEDS_VIEW,
         )),
     ],
 )
@@ -713,7 +713,7 @@ async def get_patient_chart(
         Depends(require_any_permission(
             Permission.VISITS_VIEW,
             Permission.VITALS_VIEW,
-            Permission.MEDICATIONS_VIEW,
+            Permission.MEDS_VIEW,
         )),
     ],
 )
