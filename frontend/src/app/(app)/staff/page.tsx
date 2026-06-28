@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { UserPlus } from 'lucide-react';
-import { Button, Badge, Avatar, EmptyState, PageLoader } from '@/components/ui';
+import { Button, Badge, Avatar, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { staffService } from '@/services';
 import { fmtDateTime, ROLE_DISPLAY, ROLE_COLOR, cn } from '@/utils';
@@ -36,7 +36,9 @@ export default function StaffPage() {
     <>
       <div className="flex items-start justify-between mb-6">
         <div><h1 className="page-title">Staff Management</h1><p className="page-subtitle">Manage employees, roles, and access credentials</p></div>
-        <Button variant="primary" size="sm" icon={<UserPlus size={13} />} onClick={() => setInviteOpen(true)}>Invite Staff</Button>
+        <Gated permission="staff:manage">
+          <Button variant="primary" size="sm" icon={<UserPlus size={13} />} onClick={() => setInviteOpen(true)}>Invite Staff</Button>
+        </Gated>
       </div>
 
       <div className="card">
@@ -61,10 +63,12 @@ export default function StaffPage() {
                   <td className="text-xs text-ink-3">{s.last_login_at ? fmtDateTime(s.last_login_at) : 'Never'}</td>
                   <td>
                     {s.is_active && (
-                      <Button size="xs" variant="danger"
-                        onClick={() => confirm(`Deactivate ${s.first_name} ${s.last_name} and revoke all sessions?`) && deactivateMut.mutate(s.id)}>
-                        Deactivate
-                      </Button>
+                      <Gated permission="staff:manage">
+                        <Button size="xs" variant="danger"
+                          onClick={() => confirm(`Deactivate ${s.first_name} ${s.last_name} and revoke all sessions?`) && deactivateMut.mutate(s.id)}>
+                          Deactivate
+                        </Button>
+                      </Gated>
                     )}
                   </td>
                 </tr>
