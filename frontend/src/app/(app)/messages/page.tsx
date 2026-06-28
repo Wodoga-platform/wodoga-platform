@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, Lock, Reply, ChevronDown, ChevronUp } from 'lucide-react';
-import { Button, Badge, EmptyState } from '@/components/ui';
+import { Button, Badge, EmptyState, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { messageService, staffService } from '@/services';
 import { fmtRelative, cn } from '@/utils';
@@ -93,7 +93,9 @@ export default function MessagesPage() {
           <h1 className="page-title">Secure Messaging</h1>
           <p className="page-subtitle">HIPAA-conscious encrypted internal communications — all messages audit-logged</p>
         </div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={openCompose}>New Message</Button>
+        <Gated permission="messages:send">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={openCompose}>New Message</Button>
+        </Gated>
       </div>
 
       <div className="card">
@@ -137,10 +139,12 @@ export default function MessagesPage() {
               <div className="text-xs text-ink-3 mt-0.5">From: {selected.sender_name} · {fmtRelative(selected.created_at)}</div>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="xs" variant="secondary" icon={<Reply size={12} />}
-                onClick={() => openReply(selected)}>
-                Reply
-              </Button>
+              <Gated permission="messages:send">
+                <Button size="xs" variant="secondary" icon={<Reply size={12} />}
+                  onClick={() => openReply(selected)}>
+                  Reply
+                </Button>
+              </Gated>
               <button onClick={() => setSelected(null)} className="text-ink-3 hover:text-ink text-xs">✕ Close</button>
             </div>
           </div>
