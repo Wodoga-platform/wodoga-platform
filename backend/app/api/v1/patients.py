@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, date
 
 from app.core.audit import AuditAction, AuditLogger
-from app.core.permissions import Permission, TokenPayload, require_permissions
+from app.core.permissions import Permission, TokenPayload, require_permissions, require_any_permission
 from app.dependencies import (
     get_audit_logger,
     get_client_ip,
@@ -243,7 +243,24 @@ async def get_patient(
         resource_id=patient_id,
     )
 
-    return {"data": dict(patient)}
+    patient_data = dict(patient)
+
+    # ── Role-based field filtering (HIPAA minimum-necessary) ─────────
+    # Billers need patient identifiers, demographics, insurance, and
+    # billing-relevant clinical codes (diagnoses for ICD billing). They do
+    # NOT need free-text clinical fields like allergies, medical history,
+    # or notes. This is the Critical #1 finding from PERMISSION_AUDIT_V2.md
+    # — closing the HIPAA minimum-necessary gap for the biller role.
+    if current_user.role == "biller":
+        clinical_fields_to_strip = (
+            "allergies", "medical_history",
+            "secondary_diagnoses", "notes", "photo_url",
+            "fall_risk", "blood_type",
+        )
+        for field in clinical_fields_to_strip:
+            patient_data.pop(field, None)
+
+    return {"data": patient_data}
 
 
 # ── Create Patient ────────────────────────────────────────────
@@ -474,7 +491,15 @@ async def delete_patient(
 # ── Patient Summary (All Linked Records) ──────────────────────
 @router.get(
     "/{patient_id}/summary",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
+    dependencies=[
+        Depends(require_permissions(Permission.PATIENTS_VIEW)),
+        # Summary aggregates vitals, meds, visits, care plan — clinical PHI
+        Depends(require_any_permission(
+            Permission.VISITS_VIEW,
+            Permission.VITALS_VIEW,
+            Permission.MEDICATIONS_VIEW,
+        )),
+    ],
 )
 async def get_patient_summary(
     patient_id: UUID,
@@ -567,7 +592,18 @@ async def get_patient_summary(
 
 @router.get(
     "/{patient_id}/chart",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
+    dependencies=[
+        Depends(require_permissions(Permission.PATIENTS_VIEW)),
+        # PERMISSION_AUDIT_V2 Critical #1: chart contains visits, vitals,
+        # medications — clinical PHI. Requires at least one clinical
+        # view permission, so billers (patients:view only) cannot reach
+        # it even though they have patients:view.
+        Depends(require_any_permission(
+            Permission.VISITS_VIEW,
+            Permission.VITALS_VIEW,
+            Permission.MEDICATIONS_VIEW,
+        )),
+    ],
 )
 async def get_patient_chart(
     patient_id: UUID,
@@ -671,7 +707,15 @@ async def get_patient_chart(
 
 @router.get(
     "/{patient_id}/timeline",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
+    dependencies=[
+        Depends(require_permissions(Permission.PATIENTS_VIEW)),
+        # See chart endpoint for rationale — timeline aggregates clinical events
+        Depends(require_any_permission(
+            Permission.VISITS_VIEW,
+            Permission.VITALS_VIEW,
+            Permission.MEDICATIONS_VIEW,
+        )),
+    ],
 )
 async def get_patient_timeline(
     patient_id: UUID,
