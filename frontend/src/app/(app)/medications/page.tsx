@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, AlertTriangle } from 'lucide-react';
-import { Button, Badge, EmptyState, PageLoader, Alert } from '@/components/ui';
+import { Button, Badge, EmptyState, PageLoader, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { medicationService, patientService } from '@/services';
 import { fmtDate, cn } from '@/utils';
@@ -44,7 +44,9 @@ export default function MedicationsPage() {
     <>
       <div className="flex items-start justify-between mb-6">
         <div><h1 className="page-title">Medications</h1><p className="page-subtitle">Active prescriptions, refill tracking, and medication reconciliation</p></div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>Prescribe</Button>
+        <Gated permission="medications:prescribe">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>Prescribe</Button>
+        </Gated>
       </div>
 
       {lowRefills.length > 0 && (
@@ -58,18 +60,20 @@ export default function MedicationsPage() {
         <div className="card col-span-2">
           <div className="card-header">
             <div className="text-sm font-bold">All Active Prescriptions</div>
-            <div className="flex gap-2 items-center">
-              <select className="form-select py-1.5 text-xs w-40"
-                onChange={e => setRecoPatient(e.target.value)} value={recoPatient}>
-                <option value="">Run reconciliation...</option>
-                {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
-              </select>
-              <Button size="sm" variant="secondary" disabled={!recoPatient}
-                loading={recoMut.isPending}
-                onClick={() => recoPatient && recoMut.mutate(recoPatient)}>
-                Check Conflicts
-              </Button>
-            </div>
+            <Gated permission="medications:reconcile">
+              <div className="flex gap-2 items-center">
+                <select className="form-select py-1.5 text-xs w-40"
+                  onChange={e => setRecoPatient(e.target.value)} value={recoPatient}>
+                  <option value="">Run reconciliation...</option>
+                  {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
+                </select>
+                <Button size="sm" variant="secondary" disabled={!recoPatient}
+                  loading={recoMut.isPending}
+                  onClick={() => recoPatient && recoMut.mutate(recoPatient)}>
+                  Check Conflicts
+                </Button>
+              </div>
+            </Gated>
           </div>
           {isLoading ? <PageLoader /> : meds.length === 0 ? <EmptyState icon="💊" title="No active prescriptions" /> : (
             <table className="data-table">
