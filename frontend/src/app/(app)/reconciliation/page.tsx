@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { AlertTriangle, RefreshCw, CheckCircle, ArrowUpCircle } from 'lucide-react';
-import { Button, Badge, EmptyState, Alert } from '@/components/ui';
+import { Button, Badge, EmptyState, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { medicationService, patientService } from '@/services';
 import type { ReconciliationResult } from '@/types';
@@ -87,15 +87,17 @@ export default function ReconciliationPage() {
               </select>
             )}
           </div>
-          <Button
-            variant="primary"
-            icon={<RefreshCw size={14} />}
-            disabled={!patientId}
-            loading={recoMut.isPending}
-            onClick={() => patientId && recoMut.mutate(patientId)}
-          >
-            Run Reconciliation
-          </Button>
+          <Gated permission="medications:reconcile">
+            <Button
+              variant="primary"
+              icon={<RefreshCw size={14} />}
+              disabled={!patientId}
+              loading={recoMut.isPending}
+              onClick={() => patientId && recoMut.mutate(patientId)}
+            >
+              Run Reconciliation
+            </Button>
+          </Gated>
         </div>
       </div>
 
@@ -176,14 +178,18 @@ export default function ReconciliationPage() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" icon={<CheckCircle size={14} />}
-                    onClick={() => openResolve('reviewed')}>
-                    Mark Reviewed
-                  </Button>
-                  <Button variant="primary" size="sm" icon={<ArrowUpCircle size={14} />}
-                    onClick={() => openResolve('escalated')}>
-                    Escalate
-                  </Button>
+                  <Gated permission="medications:reconcile">
+                    <Button variant="secondary" size="sm" icon={<CheckCircle size={14} />}
+                      onClick={() => openResolve('reviewed')}>
+                      Mark Reviewed
+                    </Button>
+                  </Gated>
+                  <Gated permission="medications:reconcile">
+                    <Button variant="primary" size="sm" icon={<ArrowUpCircle size={14} />}
+                      onClick={() => openResolve('escalated')}>
+                      Escalate
+                    </Button>
+                  </Gated>
                 </div>
               </div>
             </div>
