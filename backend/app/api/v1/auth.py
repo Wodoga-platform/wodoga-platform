@@ -18,6 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -346,6 +347,14 @@ async def refresh_tokens(
             detail={"error": "token_expired", "message": "Session expired. Please log in again."},
         )
 
+    # Reject if the user has been deactivated since the token was issued.
+    # The SELECT above already pulls is_active; this enforces it.
+    if not token_record["is_active"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "account_inactive", "message": "Account is no longer active. Please log in again."},
+        )
+
     # Revoke the old token immediately
     await db.execute(
         text("UPDATE refresh_tokens SET revoked = TRUE, revoked_at = NOW() WHERE id = :id"),
@@ -354,7 +363,19 @@ async def refresh_tokens(
 
     permissions = token_record["permissions"] if isinstance(token_record["permissions"], list) else []
     ip = get_client_ip(request)
-    tokens = await _issue_tokens(db, token_record, permissions, ip, request)
+
+    # Guard against a race: the user could be deleted between the SELECT
+    # and the INSERT in _issue_tokens (FK cascade fires on user delete).
+    # Without this guard, the IntegrityError becomes a noisy 500 in the
+    # logs. With it, the caller gets a clean 401 and the log stays quiet.
+    try:
+        tokens = await _issue_tokens(db, token_record, permissions, ip, request)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "invalid_token", "message": "Session is no longer valid. Please log in again."},
+        )
     await db.commit()
     return tokens
 
