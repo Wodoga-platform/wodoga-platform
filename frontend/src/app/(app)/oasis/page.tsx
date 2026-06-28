@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus } from 'lucide-react';
-import { Button, Badge, EmptyState, PageLoader } from '@/components/ui';
+import { Button, Badge, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { oasisService, patientService } from '@/services';
 import { fmtDate } from '@/utils';
@@ -48,7 +48,9 @@ export default function OASISPage() {
           <h1 className="page-title">OASIS Assessments</h1>
           <p className="page-subtitle">Medicare-required OASIS-E assessments — Start of Care, Follow-Up, Discharge, and Transfer</p>
         </div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>New Assessment</Button>
+        <Gated permission="oasis:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>New Assessment</Button>
+        </Gated>
       </div>
 
       <div className="grid grid-cols-5 gap-3 mb-5">
