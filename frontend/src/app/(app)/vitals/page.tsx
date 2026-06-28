@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, X } from 'lucide-react';
-import { Button, Badge, EmptyState, PageLoader, Alert } from '@/components/ui';
+import { Button, Badge, EmptyState, PageLoader, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { vitalsService, patientService } from '@/services';
 import { fmtDateTime, cn } from '@/utils';
@@ -44,7 +44,9 @@ export default function VitalsPage() {
     <>
       <div className="flex items-start justify-between mb-6">
         <div><h1 className="page-title">Vital Signs</h1><p className="page-subtitle">Record and monitor patient vitals — alerts auto-generated on abnormal readings</p></div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>Record Vitals</Button>
+        <Gated permission="vitals:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>Record Vitals</Button>
+        </Gated>
       </div>
 
       {alerts.length > 0 && (
