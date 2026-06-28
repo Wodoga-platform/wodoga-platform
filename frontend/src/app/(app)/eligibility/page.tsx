@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus } from 'lucide-react';
-import { Button, Badge, EmptyState } from '@/components/ui';
+import { Button, Badge, EmptyState, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { eligibilityService, patientService, staffService } from '@/services';
 import { fmtDate, fmtDateTime, ELIGIBILITY_BADGE } from '@/utils';
@@ -82,8 +82,10 @@ export default function EligibilityPage() {
             <div><label className="form-label">Insurance Provider *</label><input className="form-input" placeholder="Medicare, Blue Cross..." {...register('insurance_provider', { required: true })} /></div>
             <div><label className="form-label">Member ID *</label><input className="form-input" placeholder="MCR-000000" {...register('member_id', { required: true })} /></div>
             <div><label className="form-label">Service Date</label><input type="date" className="form-input" {...register('service_date')} /></div>
-            <Button variant="primary" className="w-full justify-center" loading={checkMut.isPending}
-              onClick={handleSubmit(d => checkMut.mutate(d))}>🔍 Check Eligibility</Button>
+            <Gated permission="eligibility:check">
+              <Button variant="primary" className="w-full justify-center" loading={checkMut.isPending}
+                onClick={handleSubmit(d => checkMut.mutate(d))}>🔍 Check Eligibility</Button>
+            </Gated>
           </div>
         </div>
         <div>
@@ -134,7 +136,9 @@ export default function EligibilityPage() {
             <div className="text-sm font-bold">Provider Insurance Contracts</div>
             <div className="text-xs text-ink-3 mt-0.5">Which insurance plans each provider accepts — used for billing and eligibility</div>
           </div>
-          <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setContractOpen(true)}>Add Contract</Button>
+          <Gated permission="staff:manage">
+            <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setContractOpen(true)}>Add Contract</Button>
+          </Gated>
         </div>
         {!contracts?.length ? (
           <EmptyState icon="📋" title="No contracts yet" description="Add which insurance plans your providers are contracted with." />
