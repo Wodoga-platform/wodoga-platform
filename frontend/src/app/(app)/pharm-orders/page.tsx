@@ -4,10 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Clock } from 'lucide-react';
-import { Button, Badge, EmptyState, PageLoader } from '@/components/ui';
+import { Button, Badge, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { pharmService, patientService } from '@/services';
 import { fmtDate, PHARM_STAGE_LABEL, cn } from '@/utils';
+import { useAuthStore } from '@/store/auth.store';
 import type { PharmStage } from '@/types';
 
 const STAGES: PharmStage[] = ['prescribed','verified','dispensed','in_transit','delivered'];
@@ -19,6 +20,7 @@ const STAGE_COLOR: Record<PharmStage, string> = {
 
 export default function PharmOrdersPage() {
   const qc = useQueryClient();
+  const canEdit = useAuthStore(s => s.hasPermission('pharm_orders:advance'));
   const [addOpen, setAddOpen] = useState(false);
   const [editOrder, setEditOrder] = useState<any | null>(null);
   const { register, handleSubmit, reset } = useForm();
@@ -68,7 +70,9 @@ export default function PharmOrdersPage() {
           <h1 className="page-title">Pharmaceutical Orders</h1>
           <p className="page-subtitle">Orders advance automatically from prescription through delivery</p>
         </div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>New Order</Button>
+        <Gated permission="pharm_orders:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>New Order</Button>
+        </Gated>
       </div>
 
       <div className="card mb-5">
@@ -90,12 +94,12 @@ export default function PharmOrdersPage() {
                       <span className="text-[10px] bg-surface-2 text-ink-3 font-bold px-2 py-0.5 rounded-full">{items.length}</span>
                     </div>
                     {items.map(o => (
-                      <div key={o.id} className={cn('pipeline-card border cursor-pointer hover:shadow-sm transition-shadow', STAGE_COLOR[o.stage])}
-                        onClick={() => setEditOrder(o)}>
+                      <div key={o.id} className={cn('pipeline-card border transition-shadow', STAGE_COLOR[o.stage], canEdit && 'cursor-pointer hover:shadow-sm')}
+                        onClick={canEdit ? () => setEditOrder(o) : undefined}>
                         {o.is_urgent && <Badge variant="red" className="text-[10px] mb-1">Urgent</Badge>}
                         <div className="flex items-start justify-between gap-1">
                           <div className="text-sm font-bold">{o.drug_name}</div>
-                          <Pencil size={11} className="text-ink-4 flex-shrink-0 mt-0.5" />
+                          {canEdit && <Pencil size={11} className="text-ink-4 flex-shrink-0 mt-0.5" />}
                         </div>
                         <div className="text-xs text-ink-3 mt-0.5">{o.first_name} {o.last_name}</div>
                         <div className="text-xs text-ink-3">{o.quantity}</div>
