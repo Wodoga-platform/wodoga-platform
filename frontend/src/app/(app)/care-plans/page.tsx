@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, Pencil } from 'lucide-react';
-import { Button, Badge, EmptyState, PageLoader } from '@/components/ui';
+import { Button, Badge, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { carePlanService, patientService } from '@/services';
 import { fmtDate, truncate } from '@/utils';
@@ -60,7 +60,9 @@ export default function CarePlansPage() {
     <>
       <div className="flex items-start justify-between mb-6">
         <div><h1 className="page-title">Care Plans</h1><p className="page-subtitle">Physician-approved care plans linked to active patients</p></div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>New Care Plan</Button>
+        <Gated permission="care_plans:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setAddOpen(true)}>New Care Plan</Button>
+        </Gated>
       </div>
 
       <div className="card">
@@ -79,7 +81,9 @@ export default function CarePlansPage() {
                   <td className="text-xs text-ink-3">{p.review_date ? fmtDate(p.review_date) : '—'}</td>
                   <td><Badge variant={p.status === 'active' ? 'green' : 'gray'}>{p.status}</Badge></td>
                   <td>
-                    <Button size="xs" variant="secondary" icon={<Pencil size={11} />} onClick={() => setEditPlan(p)}>Edit</Button>
+                    <Gated permission="care_plans:create">
+                      <Button size="xs" variant="secondary" icon={<Pencil size={11} />} onClick={() => setEditPlan(p)}>Edit</Button>
+                    </Gated>
                   </td>
                 </tr>
               ))}
