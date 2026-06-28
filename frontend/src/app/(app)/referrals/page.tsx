@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus, ArrowRight } from 'lucide-react';
-import { Button, Badge, EmptyState } from '@/components/ui';
+import { Button, Badge, EmptyState, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { referralService } from '@/services';
 import { fmtDate, REFERRAL_STAGE_LABEL, cn } from '@/utils';
@@ -46,7 +46,9 @@ export default function ReferralsPage() {
     <>
       <div className="flex items-start justify-between mb-6">
         <div><h1 className="page-title">Referral Management</h1><p className="page-subtitle">Track incoming referrals from source through admission</p></div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>New Referral</Button>
+        <Gated permission="referrals:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>New Referral</Button>
+        </Gated>
       </div>
 
       {/* Pipeline */}
@@ -78,11 +80,13 @@ export default function ReferralsPage() {
                         </Badge>
                       )}
                       {si < STAGES.length - 1 && (
-                        <Button size="xs" variant="secondary" className="w-full mt-2 justify-center"
-                          icon={<ArrowRight size={11} />}
-                          onClick={() => advanceMut.mutate(r.id)}>
-                          {REFERRAL_STAGE_LABEL[STAGES[si + 1]]}
-                        </Button>
+                        <Gated permission="referrals:advance">
+                          <Button size="xs" variant="secondary" className="w-full mt-2 justify-center"
+                            icon={<ArrowRight size={11} />}
+                            onClick={() => advanceMut.mutate(r.id)}>
+                            {REFERRAL_STAGE_LABEL[STAGES[si + 1]]}
+                          </Button>
+                        </Gated>
                       )}
                     </div>
                   ))}
