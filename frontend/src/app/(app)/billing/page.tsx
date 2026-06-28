@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Plus } from 'lucide-react';
-import { Button, Badge, StatCard, EmptyState, PageLoader } from '@/components/ui';
+import { Button, Badge, StatCard, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { billingService, patientService } from '@/services';
 import { fmtDate, fmtCurrency, CLAIM_STATUS_BADGE } from '@/utils';
@@ -55,7 +55,9 @@ export default function BillingPage() {
     <>
       <div className="flex items-start justify-between mb-6">
         <div><h1 className="page-title">Billing & Claims</h1><p className="page-subtitle">Insurance claims, payments, and revenue cycle management</p></div>
-        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>New Claim</Button>
+        <Gated permission="billing:create">
+          <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>New Claim</Button>
+        </Gated>
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-6">
@@ -83,10 +85,12 @@ export default function BillingPage() {
                     <td><Badge variant={sb.variant}>{sb.label}</Badge></td>
                     <td>
                       {STATUS_CYCLE[c.status] && (
-                        <Button size="xs" variant="secondary"
-                          onClick={() => updateMut.mutate({ id: c.id, status: STATUS_CYCLE[c.status] })}>
-                          → {STATUS_CYCLE[c.status]}
-                        </Button>
+                        <Gated permission="billing:update">
+                          <Button size="xs" variant="secondary"
+                            onClick={() => updateMut.mutate({ id: c.id, status: STATUS_CYCLE[c.status] })}>
+                            → {STATUS_CYCLE[c.status]}
+                          </Button>
+                        </Gated>
                       )}
                     </td>
                   </tr>
