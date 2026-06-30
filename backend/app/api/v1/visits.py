@@ -532,6 +532,7 @@ async def create_soap_note(
 async def cancel_visit(
     visit_id: UUID,
     reason: Optional[str] = Query(None),
+    current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
 ):
@@ -542,10 +543,11 @@ async def cancel_visit(
             UPDATE visits SET
                 status = 'cancelled',
                 cancellation_reason = :reason,
+                cancelled_by = :uid,
                 updated_at = NOW()
             WHERE id = :id
         """),
-        {"reason": reason, "id": str(visit_id)},
+        {"reason": reason, "uid": str(current_user.user_id), "id": str(visit_id)},
     )
     await audit.log(
         AuditAction.VISIT_UPDATED,
