@@ -182,6 +182,7 @@ async def get_document_url(
 )
 async def delete_document(
     document_id: UUID,
+    current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
 ):
@@ -195,8 +196,8 @@ async def delete_document(
         raise HTTPException(status_code=404, detail={"error": "not_found"})
 
     await db.execute(
-        text("UPDATE documents SET is_active = FALSE, deleted_at = NOW() WHERE id = :id"),
-        {"id": str(document_id)},
+        text("UPDATE documents SET is_active = FALSE, deleted_at = NOW(), deleted_by = :uid WHERE id = :id"),
+        {"id": str(document_id), "uid": str(current_user.user_id)},
     )
     storage.delete_document(doc["blob_path"], doc["blob_container"])
 
