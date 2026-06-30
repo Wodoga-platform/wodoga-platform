@@ -475,8 +475,8 @@ async def delete_patient(
         raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Patient not found."})
 
     await db.execute(
-        text("UPDATE patients SET deleted_at = NOW() WHERE id = :id"),
-        {"id": str(patient_id)},
+        text("UPDATE patients SET deleted_at = NOW(), deleted_by = :uid WHERE id = :id"),
+        {"id": str(patient_id), "uid": str(current_user.user_id)},
     )
 
     await audit.log(
