@@ -192,7 +192,8 @@ CREATE TABLE patients (
   photo_url           TEXT,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  deleted_at          TIMESTAMPTZ                     -- Soft delete preserves records for compliance
+  deleted_at          TIMESTAMPTZ,                    -- Soft delete preserves records for compliance
+  deleted_by          UUID REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TRIGGER set_updated_at_patients
@@ -318,6 +319,7 @@ CREATE TABLE visits (
   -- Scheduling notes
   notes               TEXT,
   cancellation_reason TEXT,
+  cancelled_by        UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -682,6 +684,7 @@ CREATE TABLE documents (
   tags                TEXT[],
   is_active           BOOLEAN NOT NULL DEFAULT TRUE,
   deleted_at          TIMESTAMPTZ,
+  deleted_by          UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
