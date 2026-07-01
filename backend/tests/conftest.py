@@ -175,3 +175,135 @@ async def tenant_session(engine, organization_id: str) -> AsyncSession:
         {"org": safe_org},
     )
     return session
+
+
+# ════════════════════════════════════════════════════════════════════
+# ROLE-BASED USER FIXTURES (added for access-control integration tests)
+# ════════════════════════════════════════════════════════════════════
+#
+# WHAT THIS ADDS (plain English):
+# The fixtures above create organizations and patients. To test access
+# control — "can a biller see clinical fields?", "can a caregiver edit a
+# patient?" — we also need USERS with specific ROLES. These helpers create
+# a single-org world with a patient and a user of whatever role the test
+# asks for, then clean it all up.
+#
+# Roles are looked up BY NAME (not hardcoded UUID) so these fixtures work
+# regardless of the role UUIDs in the test database, as long as seed.sql
+# has been applied (which creates the standard roles).
+
+
+async def _make_org(session, tag: str) -> str:
+    """Create one test organization, return its id."""
+    oid = str(uuid.uuid4())
+    await session.execute(
+        text("""
+            INSERT INTO organizations (id, name, slug, type, email,
+                subscription_tier, subscription_status, hipaa_baa_signed)
+            VALUES (:id, :name, :slug, 'both', :email, 'trial', 'active', FALSE)
+        """),
+        {"id": oid, "name": f"TEST-{tag}", "slug": f"test-{tag}",
+         "email": f"test-{tag}@test.local"},
+    )
+    return oid
+
+
+async def _role_id_by_name(session, role_name: str) -> str | None:
+    """Look up a role's UUID by its name. Returns None if not found."""
+    row = (await session.execute(
+        text("SELECT id FROM roles WHERE name = :n LIMIT 1"),
+        {"n": role_name},
+    )).first()
+    return str(row[0]) if row else None
+
+
+async def _make_user(session, org_id: str, role_name: str, tag: str) -> dict:
+    """
+    Create a user with the given role inside the given org.
+    Returns {id, email, role_name, role_id} or raises if role missing.
+    """
+    role_id = await _role_id_by_name(session, role_name)
+    if role_id is None:
+        pytest.skip(f"Role '{role_name}' not present in test DB — seed.sql may not be applied.")
+    uid = str(uuid.uuid4())
+    email = f"{role_name}-{tag}@test.local"
+    await session.execute(
+        text("""
+            INSERT INTO users (id, organization_id, role_id, first_name, last_name,
+                email, password_hash, is_active, is_email_verified)
+            VALUES (:id, :org, :role, :fn, 'Tester', :email,
+                '$2b$12$abcdefghijklmnopqrstuv', TRUE, TRUE)
+        """),
+        {"id": uid, "org": org_id, "role": role_id,
+         "fn": role_name.capitalize(), "email": email},
+    )
+    return {"id": uid, "email": email, "role_name": role_name, "role_id": role_id}
+
+
+@pytest_asyncio.fixture
+async def org_with_roles(engine):
+    """
+    Creates ONE organization containing:
+      - one patient (with clinical fields populated)
+      - one user of each standard role (admin, provider, biller,
+        caregiver, pharmacy_staff, viewer)
+
+    Yields a dict with the org id, patient id, and a 'users' map of
+    role_name -> user dict. Cleans everything up afterward.
+
+    Tests use this to verify role-based access: e.g. fetch the patient
+    as the biller's role permissions and confirm clinical fields are
+    stripped.
+    """
+    SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    tag = uuid.uuid4().hex[:8]
+    patient_id = str(uuid.uuid4())
+    roles_to_make = ["admin", "provider", "biller", "caregiver", "pharmacy_staff", "viewer"]
+    users: dict = {}
+
+    async with SessionLocal() as s:
+        org_id = await _make_org(s, tag)
+        await s.commit()
+
+    # Create users (no RLS on users table for inserts as superuser here)
+    async with SessionLocal() as s:
+        for role_name in roles_to_make:
+            try:
+                u = await _make_user(s, org_id, role_name, tag)
+                users[role_name] = u
+            except Exception:
+                # If a role doesn't exist, skip just that user
+                pass
+        await s.commit()
+
+    # Create one patient WITH clinical fields, in org context (RLS on insert)
+    async with SessionLocal() as s:
+        await s.execute(
+            text("SELECT set_config('app.organization_id', :org, false)"),
+            {"org": org_id},
+        )
+        await s.execute(
+            text("""
+                INSERT INTO patients (id, organization_id, first_name, last_name,
+                    date_of_birth, primary_diagnosis, allergies, medical_history, notes)
+                VALUES (:id, :org, 'Clinical', 'Patient', '1950-01-01',
+                    'I50.9', ARRAY['Penicillin'], 'CHF since 2019', 'Prefers mornings')
+            """),
+            {"id": patient_id, "org": org_id},
+        )
+        await s.commit()
+
+    yield {"org_id": org_id, "patient_id": patient_id, "tag": tag, "users": users}
+
+    # ── Cleanup ──
+    async with SessionLocal() as s:
+        await s.execute(
+            text("SELECT set_config('app.organization_id', :org, false)"),
+            {"org": org_id},
+        )
+        await s.execute(text("DELETE FROM patients WHERE organization_id = :o"), {"o": org_id})
+        await s.commit()
+    async with SessionLocal() as s:
+        await s.execute(text("DELETE FROM users WHERE organization_id = :o"), {"o": org_id})
+        await s.execute(text("DELETE FROM organizations WHERE id = :o"), {"o": org_id})
+        await s.commit()
