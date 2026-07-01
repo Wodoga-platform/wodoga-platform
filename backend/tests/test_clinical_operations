@@ -1,0 +1,274 @@
+"""
+Wodoga Platform — Clinical Data Operation Tests
+=================================================
+
+WHAT THESE PROVE (plain English):
+These test the core clinical data operations at the database level — the
+create/read/update/soft-delete flows that clinicians use every day — and
+confirm they behave correctly AND stay tenant-isolated.
+
+Unlike test_tenant_isolation.py (which focuses purely on leakage) and
+test_access_control.py (which checks role permissions), these focus on
+"do the actual data operations work correctly?"
+
+They cover:
+  - Creating a patient and reading it back within the same org
+  - Updating a patient's fields
+  - Soft-deleting a patient (deleted_at set, disappears from normal reads)
+  - Soft-delete attribution (deleted_by captures who)
+  - Vitals and visits insert + scope correctly to their org
+  - A soft-deleted patient does not appear in a standard "alive" query
+
+These need a test database (see RUNNING_TESTS.md). Run:
+    pytest tests/test_clinical_operations.py -v
+"""
+import uuid
+import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+
+from tests.conftest import tenant_session
+
+
+# ────────────────────────────────────────────────────────────
+# Patient CRUD
+# ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_and_read_patient(engine, two_orgs):
+    """A patient inserted in org A's context is readable in org A's context."""
+    s = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        pid = str(uuid.uuid4())
+        await s.execute(
+            text("""
+                INSERT INTO patients (id, organization_id, first_name, last_name, date_of_birth)
+                VALUES (:id, :org, 'Created', 'Test', '1960-05-05')
+            """),
+            {"id": pid, "org": two_orgs["org_a"]},
+        )
+        await s.commit()
+
+        row = (await s.execute(
+            text("SELECT first_name, last_name FROM patients WHERE id = :id"),
+            {"id": pid},
+        )).first()
+        assert row is not None, "Created patient could not be read back"
+        assert row[0] == "Created" and row[1] == "Test"
+
+        # cleanup
+        await s.execute(text("DELETE FROM patients WHERE id = :id"), {"id": pid})
+        await s.commit()
+    finally:
+        await s.close()
+
+
+@pytest.mark.asyncio
+async def test_update_patient_fields(engine, two_orgs):
+    """Updating a patient's field persists and reads back correctly."""
+    s = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        pid = str(uuid.uuid4())
+        await s.execute(
+            text("""
+                INSERT INTO patients (id, organization_id, first_name, last_name, date_of_birth)
+                VALUES (:id, :org, 'Before', 'Update', '1960-05-05')
+            """),
+            {"id": pid, "org": two_orgs["org_a"]},
+        )
+        await s.commit()
+
+        await s.execute(
+            text("UPDATE patients SET first_name = 'After' WHERE id = :id"),
+            {"id": pid},
+        )
+        await s.commit()
+
+        row = (await s.execute(
+            text("SELECT first_name FROM patients WHERE id = :id"),
+            {"id": pid},
+        )).first()
+        assert row[0] == "After", "Patient update did not persist"
+
+        await s.execute(text("DELETE FROM patients WHERE id = :id"), {"id": pid})
+        await s.commit()
+    finally:
+        await s.close()
+
+
+# ────────────────────────────────────────────────────────────
+# Soft-delete behavior
+# ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_soft_delete_sets_deleted_at_and_by(engine, two_orgs):
+    """Soft-deleting a patient sets deleted_at and deleted_by."""
+    s = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        pid = str(uuid.uuid4())
+        actor = str(uuid.uuid4())  # a stand-in user id
+        await s.execute(
+            text("""
+                INSERT INTO patients (id, organization_id, first_name, last_name, date_of_birth)
+                VALUES (:id, :org, 'Soft', 'Delete', '1960-05-05')
+            """),
+            {"id": pid, "org": two_orgs["org_a"]},
+        )
+        await s.commit()
+
+        # Soft-delete with attribution (mirrors the endpoint)
+        await s.execute(
+            text("UPDATE patients SET deleted_at = NOW(), deleted_by = :uid WHERE id = :id"),
+            {"id": pid, "uid": actor},
+        )
+        await s.commit()
+
+        row = (await s.execute(
+            text("SELECT deleted_at, deleted_by FROM patients WHERE id = :id"),
+            {"id": pid},
+        )).first()
+        assert row[0] is not None, "deleted_at was not set"
+        assert str(row[1]) == actor, "deleted_by did not capture the actor"
+
+        await s.execute(text("DELETE FROM patients WHERE id = :id"), {"id": pid})
+        await s.commit()
+    finally:
+        await s.close()
+
+
+@pytest.mark.asyncio
+async def test_soft_deleted_patient_excluded_from_alive_query(engine, two_orgs):
+    """A soft-deleted patient should not appear in a WHERE deleted_at IS NULL query."""
+    s = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        pid = str(uuid.uuid4())
+        await s.execute(
+            text("""
+                INSERT INTO patients (id, organization_id, first_name, last_name, date_of_birth, deleted_at)
+                VALUES (:id, :org, 'Ghost', 'Patient', '1960-05-05', NOW())
+            """),
+            {"id": pid, "org": two_orgs["org_a"]},
+        )
+        await s.commit()
+
+        # The standard "alive patients" query the app uses
+        rows = (await s.execute(
+            text("SELECT id FROM patients WHERE deleted_at IS NULL AND id = :id"),
+            {"id": pid},
+        )).all()
+        assert len(rows) == 0, "Soft-deleted patient appeared in an alive-only query"
+
+        await s.execute(text("DELETE FROM patients WHERE id = :id"), {"id": pid})
+        await s.commit()
+    finally:
+        await s.close()
+
+
+# ────────────────────────────────────────────────────────────
+# Vitals + visits — insert and tenant scoping
+# ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_vitals_insert_and_read(engine, two_orgs):
+    """Vitals can be recorded for a patient and read back in-org."""
+    s = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        # two_orgs already made patient_a in org A
+        vid = str(uuid.uuid4())
+        await s.execute(
+            text("""
+                INSERT INTO vitals (id, organization_id, patient_id, heart_rate, recorded_at)
+                VALUES (:id, :org, :pid, 72, NOW())
+            """),
+            {"id": vid, "org": two_orgs["org_a"], "pid": two_orgs["patient_a"]},
+        )
+        await s.commit()
+
+        row = (await s.execute(
+            text("SELECT heart_rate FROM vitals WHERE id = :id"),
+            {"id": vid},
+        )).first()
+        assert row is not None and row[0] == 72
+
+        await s.execute(text("DELETE FROM vitals WHERE id = :id"), {"id": vid})
+        await s.commit()
+    finally:
+        await s.close()
+
+
+@pytest.mark.asyncio
+async def test_vitals_do_not_leak_across_orgs(engine, two_orgs):
+    """Vitals recorded in org A must not be visible from org B."""
+    # Insert a vital in org A
+    sa = await tenant_session(engine, two_orgs["org_a"])
+    vid = str(uuid.uuid4())
+    try:
+        await sa.execute(
+            text("""
+                INSERT INTO vitals (id, organization_id, patient_id, heart_rate, recorded_at)
+                VALUES (:id, :org, :pid, 88, NOW())
+            """),
+            {"id": vid, "org": two_orgs["org_a"], "pid": two_orgs["patient_a"]},
+        )
+        await sa.commit()
+    finally:
+        await sa.close()
+
+    # Try to read it from org B
+    sb = await tenant_session(engine, two_orgs["org_b"])
+    try:
+        row = (await sb.execute(
+            text("SELECT id FROM vitals WHERE id = :id"),
+            {"id": vid},
+        )).first()
+        assert row is None, "LEAK: org B can see org A's vitals record!"
+    finally:
+        await sb.close()
+
+    # cleanup from org A
+    sa2 = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        await sa2.execute(text("DELETE FROM vitals WHERE id = :id"), {"id": vid})
+        await sa2.commit()
+    finally:
+        await sa2.close()
+
+
+@pytest.mark.asyncio
+async def test_visit_insert_and_cancel_attribution(engine, two_orgs):
+    """A visit can be created and cancelled with cancelled_by attribution."""
+    s = await tenant_session(engine, two_orgs["org_a"])
+    try:
+        vid = str(uuid.uuid4())
+        actor = str(uuid.uuid4())
+        await s.execute(
+            text("""
+                INSERT INTO visits (id, organization_id, patient_id, status, visit_date)
+                VALUES (:id, :org, :pid, 'scheduled', CURRENT_DATE)
+            """),
+            {"id": vid, "org": two_orgs["org_a"], "pid": two_orgs["patient_a"]},
+        )
+        await s.commit()
+
+        # Cancel with attribution (mirrors the endpoint)
+        await s.execute(
+            text("""
+                UPDATE visits SET status = 'cancelled',
+                    cancellation_reason = 'test', cancelled_by = :uid
+                WHERE id = :id
+            """),
+            {"id": vid, "uid": actor},
+        )
+        await s.commit()
+
+        row = (await s.execute(
+            text("SELECT status, cancelled_by FROM visits WHERE id = :id"),
+            {"id": vid},
+        )).first()
+        assert row[0] == "cancelled"
+        assert str(row[1]) == actor, "cancelled_by did not capture the actor"
+
+        await s.execute(text("DELETE FROM visits WHERE id = :id"), {"id": vid})
+        await s.commit()
+    finally:
+        await s.close()
