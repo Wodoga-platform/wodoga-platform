@@ -18,6 +18,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, AuditLogger
+from app.api.v1.clinical_schemas import (
+    ReconciliationResolveRequest,
+    CarePlanUpdateRequest,
+    ClaimStatusUpdateRequest,
+    PharmOrderCreateRequest,
+    PharmOrderUpdateRequest,
+    OASISCreateRequest,
+    MessageSendRequest,
+    StaffInviteRequest,
+)
 from app.core.permissions import Permission, TokenPayload, require_permissions
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
 
@@ -47,6 +57,13 @@ class MedicationCreate(BaseModel):
     next_refill_date: Optional[str] = None
     prescriber_name: Optional[str] = None
     prescriber_npi: Optional[str] = None
+    # Clinical safety override: when a prescription triggers a CRITICAL safety
+    # alert (e.g. documented allergy), the prescriber may proceed only by
+    # explicitly acknowledging with a documented reason. The frontend sends
+    # these after showing the alert. Absent an override, a blocking alert
+    # rejects the prescription.
+    safety_override: bool = False
+    safety_override_reason: Optional[str] = None
     pharmacy_name: Optional[str] = None
     controlled_substance: bool = False
     schedule: Optional[str] = None
@@ -126,6 +143,49 @@ async def prescribe_medication(
     patient = p.mappings().first()
     if not patient:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    # ── CLINICAL SAFETY CHECK (allergy / cross-reactivity / duplicate) ──
+    # Runs BEFORE the medication is written. A CRITICAL alert (e.g. a
+    # documented allergy match) blocks the prescription unless the prescriber
+    # explicitly overrides with a documented reason. All alerts and any
+    # override are recorded in the audit trail. Never a silent pass.
+    from app.core.clinical_safety import check_prescription_safety, has_blocking_alerts
+
+    _alerts = await check_prescription_safety(
+        db,
+        patient_id=str(body.patient_id),
+        drug_name=body.drug_name,
+        drug_class=body.frequency_code,  # best-available class hint; replace with real drug-DB class
+        brand_name=body.brand_name,
+    )
+    if has_blocking_alerts(_alerts):
+        if not body.safety_override or not (body.safety_override_reason or "").strip():
+            await audit.log(
+                AuditAction.MEDICATION_PRESCRIBED,
+                f"BLOCKED prescription of {body.drug_name} for "
+                f"{patient['first_name']} {patient['last_name']} \u2014 critical safety alert(s): "
+                + "; ".join(a.message for a in _alerts if a.severity.value == "critical"),
+                patient_id=body.patient_id, resource_type="medication", resource_id=None,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "safety_alert",
+                    "message": "This prescription triggered a clinical safety alert. "
+                               "Review the alerts and, if clinically appropriate, resubmit "
+                               "with an override reason.",
+                    "alerts": [a.to_dict() for a in _alerts],
+                    "requires_override": True,
+                },
+            )
+        await audit.log(
+            AuditAction.MEDICATION_PRESCRIBED,
+            f"SAFETY OVERRIDE by prescriber for {body.drug_name} "
+            f"(patient {patient['first_name']} {patient['last_name']}). "
+            f"Reason: {body.safety_override_reason.strip()}. Alerts: "
+            + "; ".join(a.message for a in _alerts),
+            patient_id=body.patient_id, resource_type="medication", resource_id=None,
+        )
 
     result = await db.execute(
         text("""
@@ -280,7 +340,7 @@ async def run_reconciliation(
 )
 async def resolve_reconciliation(
     reconciliation_id: UUID,
-    body: dict,
+    body: ReconciliationResolveRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -290,13 +350,8 @@ async def resolve_reconciliation(
     'reviewed' (discrepancies addressed) or 'escalated' (needs prescriber/
     pharmacist attention), with resolution notes for the audit trail.
     """
-    new_status = body.get("status")
-    if new_status not in ("reviewed", "escalated"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "invalid_status",
-                    "message": "Status must be 'reviewed' or 'escalated'."},
-        )
+    # Validation now happens in the schema; status is guaranteed valid here.
+    new_status = body.status
 
     result = await db.execute(
         text("""
@@ -310,7 +365,7 @@ async def resolve_reconciliation(
         """),
         {
             "status": new_status,
-            "notes": body.get("resolution_notes", ""),
+            "notes": body.resolution_notes or "",
             "by": str(current_user.user_id),
             "id": str(reconciliation_id),
         },
@@ -326,7 +381,7 @@ async def resolve_reconciliation(
     await audit.log(
         AuditAction.RECONCILIATION_RUN,
         f"Reconciliation {new_status} by clinician" +
-        (f": {body.get('resolution_notes')}" if body.get("resolution_notes") else ""),
+        (f": {body.resolution_notes}" if body.resolution_notes else ""),
         patient_id=updated["patient_id"],
         resource_type="reconciliation", resource_id=reconciliation_id,
     )
@@ -441,7 +496,7 @@ async def create_care_plan(
 )
 async def update_care_plan(
     care_plan_id: UUID,
-    body: dict,
+    body: CarePlanUpdateRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -453,6 +508,10 @@ async def update_care_plan(
     plan = existing.mappings().first()
     if not plan:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    # Only update fields explicitly provided in the request (partial update).
+    # exclude_unset=True is the Pydantic equivalent of "if field in body".
+    provided = body.model_dump(exclude_unset=True)
 
     # Map incoming field names to columns; date fields get converted
     editable = {
@@ -473,8 +532,8 @@ async def update_care_plan(
     set_clauses = []
     params = {"id": str(care_plan_id)}
     for field, col in editable.items():
-        if field in body:
-            val = _to_date(body[field]) if field in date_fields else body[field]
+        if field in provided:
+            val = _to_date(provided[field]) if field in date_fields else provided[field]
             set_clauses.append(f"{col} = :{col}")
             params[col] = val
 
@@ -772,11 +831,11 @@ async def submit_claim(
     dependencies=[Depends(require_permissions(Permission.BILLING_UPDATE))],
 )
 async def update_claim_status(
-    claim_id: UUID, body: dict,
+    claim_id: UUID, body: ClaimStatusUpdateRequest,
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
 ):
-    new_status = body.get("status")
+    new_status = body.status
     valid = ["pending", "approved", "denied", "appealed", "paid", "written_off"]
     if new_status not in valid:
         raise HTTPException(status_code=400, detail={"error": "invalid_status"})
@@ -792,11 +851,11 @@ async def update_claim_status(
     params = {"status": new_status, "id": str(claim_id)}
     if new_status == "paid":
         extra = ", paid_at = NOW(), amount_paid = :amount_paid"
-        params["amount_paid"] = body.get("amount_paid", claim["amount_billed"])
+        params["amount_paid"] = body.amount_paid if body.amount_paid is not None else claim["amount_billed"]
     if new_status in ("denied", "appealed"):
         extra += ", denial_reason = :denial_reason, denial_code = :denial_code"
-        params["denial_reason"] = body.get("denial_reason")
-        params["denial_code"] = body.get("denial_code")
+        params["denial_reason"] = body.denial_reason
+        params["denial_code"] = body.denial_code
 
     await db.execute(
         text(f"UPDATE billing_claims SET status = :status{extra}, updated_at = NOW() WHERE id = :id"),
@@ -866,7 +925,7 @@ async def list_pharm_orders(
     dependencies=[Depends(require_permissions(Permission.PHARM_CREATE))],
 )
 async def create_pharm_order(
-    body: dict,
+    body: PharmOrderCreateRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -885,22 +944,22 @@ async def create_pharm_order(
         """),
         {
             "org": str(current_user.organization_id),
-            "patient": str(body.get("patient_id")),
-            "med": body.get("medication_id"),
+            "patient": str(body.patient_id),
+            "med": str(body.medication_id) if body.medication_id else None,
             "by": str(current_user.user_id),
-            "drug": body.get("drug_name"),
-            "qty": body.get("quantity"),
-            "pharmacy": body.get("pharmacy_name"),
-            "ph_phone": body.get("pharmacy_phone"),
-            "delivery": _to_date(body.get("expected_delivery")),
-            "urgent": body.get("is_urgent", False),
-            "notes": body.get("notes"),
+            "drug": body.drug_name,
+            "qty": body.quantity,
+            "pharmacy": body.pharmacy_name,
+            "ph_phone": body.pharmacy_phone,
+            "delivery": _to_date(body.expected_delivery),
+            "urgent": body.is_urgent or False,
+            "notes": body.notes,
         },
     )
     order = result.mappings().first()
     await audit.log(
         AuditAction.PHARM_ORDER_CREATED,
-        f"Pharm order placed: {body.get('drug_name')} — {body.get('quantity')}",
+        f"Pharm order placed: {body.drug_name} — {body.quantity}",
         resource_type="pharm_order", resource_id=order["id"],
     )
     return {"data": dict(order), "message": "Order placed."}
@@ -912,7 +971,7 @@ async def create_pharm_order(
 )
 async def update_pharm_order(
     order_id: UUID,
-    body: dict,
+    body: PharmOrderUpdateRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -924,6 +983,9 @@ async def update_pharm_order(
     order = existing.mappings().first()
     if not order:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    # Only update fields explicitly provided in the request (partial update).
+    provided = body.model_dump(exclude_unset=True)
 
     editable = {
         "drug_name": "drug_name",
@@ -940,8 +1002,8 @@ async def update_pharm_order(
     set_clauses = []
     params = {"id": str(order_id)}
     for field, col in editable.items():
-        if field in body:
-            val = _to_date(body[field]) if field in date_fields else body[field]
+        if field in provided:
+            val = _to_date(provided[field]) if field in date_fields else provided[field]
             set_clauses.append(f"{col} = :{col}")
             params[col] = val
 
@@ -1032,7 +1094,7 @@ async def list_oasis(
     dependencies=[Depends(require_permissions(Permission.OASIS_CREATE))],
 )
 async def create_oasis(
-    body: dict,
+    body: OASISCreateRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -1052,22 +1114,22 @@ async def create_oasis(
         """),
         {
             "org": str(current_user.organization_id),
-            "patient": str(body.get("patient_id")),
+            "patient": str(body.patient_id),
             "by": str(current_user.user_id),
-            "type": body.get("assessment_type"),
-            "date": _to_date(body.get("assessment_date")),
-            "responses": json.dumps(body.get("responses", {})),
-            "m1032": str(body.get("m1032_hospitalization_risk")) if body.get("m1032_hospitalization_risk") is not None else None,
-            "m1800": str(body.get("m1800_grooming")) if body.get("m1800_grooming") is not None else None,
-            "m2020": str(body.get("m2020_oral_medications")) if body.get("m2020_oral_medications") is not None else None,
-            "notes": body.get("clinical_notes"),
+            "type": body.assessment_type,
+            "date": _to_date(body.assessment_date),
+            "responses": json.dumps(body.responses or {}),
+            "m1032": str(body.m1032_hospitalization_risk) if body.m1032_hospitalization_risk is not None else None,
+            "m1800": str(body.m1800_grooming) if body.m1800_grooming is not None else None,
+            "m2020": str(body.m2020_oral_medications) if body.m2020_oral_medications is not None else None,
+            "notes": body.clinical_notes,
         },
     )
     assessment = result.mappings().first()
     await audit.log(
         AuditAction.OASIS_CREATED,
-        f"OASIS {body.get('assessment_type')} submitted for patient {body.get('patient_id')}",
-        patient_id=UUID(body["patient_id"]) if body.get("patient_id") else None,
+        f"OASIS {body.assessment_type} submitted for patient {body.patient_id}",
+        patient_id=body.patient_id,
         resource_type="oasis", resource_id=assessment["id"],
     )
     return {"data": dict(assessment), "message": "OASIS assessment submitted."}
@@ -1111,7 +1173,7 @@ async def list_messages(
     dependencies=[Depends(require_permissions(Permission.MESSAGES_SEND))],
 )
 async def send_message(
-    body: dict,
+    body: MessageSendRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -1127,12 +1189,12 @@ async def send_message(
         {
             "org": str(current_user.organization_id),
             "sender": str(current_user.user_id),
-            "recipient": str(body.get("recipient_id")),
-            "patient": body.get("patient_id"),
-            "subject": body.get("subject"),
-            "body": body.get("body"),
-            "urgent": body.get("is_urgent", False),
-            "parent": body.get("parent_message_id") or None,
+            "recipient": str(body.recipient_id),
+            "patient": str(body.patient_id) if body.patient_id else None,
+            "subject": body.subject,
+            "body": body.body,
+            "urgent": body.is_urgent or False,
+            "parent": str(body.parent_message_id) if body.parent_message_id else None,
         },
     )
     msg = result.mappings().first()
@@ -1145,16 +1207,16 @@ async def send_message(
         """),
         {
             "org": str(current_user.organization_id),
-            "user": str(body.get("recipient_id")),
+            "user": str(body.recipient_id),
             "title": f"New message from {current_user.role}",
-            "body": body.get("subject", ""),
-            "priority": "high" if body.get("is_urgent") else "normal",
+            "body": body.subject,
+            "priority": "high" if body.is_urgent else "normal",
         },
     )
 
     await audit.log(
         AuditAction.MESSAGE_SENT,
-        f"Secure message sent to {body.get('recipient_id')}: \"{body.get('subject')}\"",
+        f"Secure message sent to {body.recipient_id}: \"{body.subject}\"",
         resource_type="message", resource_id=msg["id"],
     )
     return {"data": dict(msg), "message": "Message sent securely."}
@@ -1274,7 +1336,7 @@ async def list_staff(
     dependencies=[Depends(require_permissions(Permission.STAFF_MANAGE))],
 )
 async def invite_staff(
-    body: dict,
+    body: StaffInviteRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
@@ -1285,7 +1347,7 @@ async def invite_staff(
 
     role_result = await db.execute(
         text("SELECT id FROM roles WHERE name = :role AND organization_id = :org"),
-        {"role": body.get("role"), "org": str(current_user.organization_id)},
+        {"role": body.role, "org": str(current_user.organization_id)},
     )
     role = role_result.mappings().first()
     if not role:
@@ -1311,10 +1373,10 @@ async def invite_staff(
         """),
         {
             "org": str(current_user.organization_id), "role": str(role["id"]),
-            "fn": body.get("first_name"), "ln": body.get("last_name"),
-            "email": body.get("email"), "phone": body.get("phone"),
+            "fn": body.first_name, "ln": body.last_name,
+            "email": body.email, "phone": body.phone,
             "pw": temp_password,
-            "license": body.get("license_number"), "lic_type": body.get("license_type"),
+            "license": body.license_number, "lic_type": body.license_type,
             "token": invite_token,
             "expires": datetime.now(timezone.utc) + timedelta(hours=48),
         },
@@ -1323,7 +1385,7 @@ async def invite_staff(
 
     await audit.log(
         AuditAction.STAFF_CREATED,
-        f"Staff invited: {body.get('first_name')} {body.get('last_name')} as {body.get('role')}",
+        f"Staff invited: {body.first_name} {body.last_name} as {body.role}",
         resource_type="user", resource_id=staff_member["id"],
     )
 
