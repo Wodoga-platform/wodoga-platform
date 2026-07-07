@@ -15,12 +15,14 @@ GET  /api/v1/portal/me/documents        Documents shared with patient
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import TokenPayload
+from app.api.v1.clinical_schemas import PortalMessageSendRequest
+from app.core.limiter import limiter
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
 
 router = APIRouter(prefix="/portal", tags=["Patient Portal"])
@@ -260,13 +262,20 @@ async def portal_my_messages(
 
 
 @router.post("/me/messages", status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def portal_send_message(
-    body: dict,
+    request: Request,
+    body: PortalMessageSendRequest,
     current_user: TokenPayload = Depends(get_current_user_payload),
     db: AsyncSession = Depends(get_db_for_tenant),
     audit: AuditLogger = Depends(get_audit_logger),
 ):
-    """Allows a patient to send a message to their assigned care team."""
+    """Allows a patient to send a message to their assigned care team.
+
+    Rate-limited to 10/minute: comfortably above any real patient's
+    messaging pace, but stops a compromised or scripted session from
+    flooding the clinic's message system.
+    """
     if current_user.role != "patient":
         raise HTTPException(status_code=403, detail={"error": "portal_only"})
 
@@ -282,7 +291,7 @@ async def portal_send_message(
     )
     patient = result.mappings().first()
 
-    recipient_id = body.get("recipient_id") or patient["assigned_provider"] or patient["assigned_caregiver"]
+    recipient_id = (str(body.recipient_id) if body.recipient_id else None) or patient["assigned_provider"] or patient["assigned_caregiver"]
     if not recipient_id:
         raise HTTPException(
             status_code=400,
@@ -302,15 +311,15 @@ async def portal_send_message(
             "sender": str(current_user.user_id),
             "recipient": str(recipient_id),
             "patient": str(patient_id),
-            "subject": body.get("subject", "Message from patient"),
-            "body": body.get("body", ""),
+            "subject": body.subject or "Message from patient",
+            "body": body.body or "",
         },
     )
     msg = msg_result.mappings().first()
 
     await audit.log(
         "PORTAL_MESSAGE_SENT",
-        f"Patient sent message to care team: \"{body.get('subject')}\"",
+        f"Patient sent message to care team: \"{body.subject}\"",
         patient_id=patient_id, resource_type="message", resource_id=msg["id"],
     )
     return {"data": dict(msg), "message": "Message sent to your care team."}
