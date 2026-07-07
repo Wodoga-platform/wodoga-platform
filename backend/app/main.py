@@ -129,6 +129,45 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Permissions-Policy"]      = "geolocation=(self), camera=(), microphone=()"
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # ── Content-Security-Policy (REPORT-ONLY) ────────────────────────
+    # This is deliberately Report-Only: the browser LOGS violations to the
+    # console but BLOCKS NOTHING. It is therefore inert — it cannot break
+    # the site. The purpose is to collect real violation data for a few
+    # days so we learn exactly which sources are legitimately needed,
+    # THEN switch to an enforcing `Content-Security-Policy` header with
+    # confidence instead of guessing.
+    #
+    # Directive reasoning:
+    #   default-src 'self'      — baseline: only same-origin unless overridden
+    #   script-src              — 'unsafe-inline'/'eval' TEMPORARILY allowed
+    #                             because Next.js hydration injects inline
+    #                             scripts. The real fix is nonce-based CSP;
+    #                             until then, allowing inline here keeps the
+    #                             report signal clean (no framework noise).
+    #                             When we enforce, replace with nonces.
+    #   style-src 'unsafe-inline' — Tailwind/Next inline critical styles.
+    #   img-src ... data: https:  — allows data-URI and remote images.
+    #   connect-src             — MUST list the API origin or every API call
+    #                             reports as a violation. REPLACE the
+    #                             placeholder below with the real Railway API
+    #                             URL before enforcing.
+    #   object-src 'none'       — no <object>/<embed>; cheap, strict, safe.
+    #   frame-ancestors 'none'  — clickjacking defense (mirrors X-Frame DENY).
+    #   base-uri 'self'         — prevents <base>-tag injection attacks.
+    #   form-action 'self'      — forms can only submit to same origin.
+    response.headers["Content-Security-Policy-Report-Only"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' https://api.wodoga.com https://*.railway.app; "  # TODO: pin to real API origin before enforcing
+        "object-src 'none'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
     return response
 
 @app.exception_handler(WodogaException)
