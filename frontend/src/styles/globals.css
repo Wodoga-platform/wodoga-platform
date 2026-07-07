@@ -1,15 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ────────────────────────────────────────────────────────────
+   Wodoga Design System v2 — "The Care Thread"
+   Every class name from v1 is preserved; values evolved.
+   ──────────────────────────────────────────────────────────── */
 
 /* ── Base ───────────────────────────────────────────────────── */
 @layer base {
   *, *::before, *::after { box-sizing: border-box; }
 
   html {
-    font-size: 14px;
+    font-size: 14px; /* clinical density baseline — do not raise casually */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -17,6 +22,7 @@
   body {
     @apply bg-bg text-ink font-sans;
     min-height: 100vh;
+    font-feature-settings: 'cv05', 'cv11'; /* Inter: open digits/letters for clinical legibility */
   }
 
   /* Scrollbars */
@@ -25,13 +31,22 @@
   ::-webkit-scrollbar-thumb  { @apply bg-surface-border rounded-full; }
   ::-webkit-scrollbar-thumb:hover { @apply bg-ink-4; }
 
-  /* Focus ring */
+  /* Focus ring — visible, branded, consistent (WCAG 2.4.7) */
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-forest-light;
+    outline: 2px solid theme('colors.forest.light');
+    outline-offset: 2px;
+    border-radius: 2px;
   }
 
-  input, textarea, select {
-    @apply text-ink;
+  input, textarea, select { @apply text-ink; }
+
+  /* Respect users who opt out of motion (WCAG 2.3.3) */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
@@ -39,94 +54,68 @@
 @layer components {
 
   /* Page container */
-  .page-container {
-    @apply p-7 max-w-full;
-  }
+  .page-container { @apply p-7 max-w-full; }
 
-  /* Card */
+  /* Card — flatter border-led elevation; shadow only on interaction */
   .card {
-    @apply bg-surface border border-surface-border rounded-lg shadow-sm overflow-hidden;
+    @apply bg-surface border border-surface-border rounded-lg shadow-xs overflow-hidden;
   }
-
   .card-header {
     @apply px-5 py-4 border-b border-surface-border flex items-center justify-between;
   }
+  .card-body { @apply p-5; }
 
-  .card-body {
-    @apply p-5;
-  }
-
-  /* Form inputs */
+  /* Form inputs — white field on tinted page, crisper focus */
   .form-input {
-    @apply w-full px-3 py-2.5 bg-bg border border-surface-border rounded
+    @apply w-full px-3 py-2.5 bg-surface border border-surface-border rounded
            text-ink text-sm font-sans
-           focus:outline-none focus:border-forest-light focus:ring-2 focus:ring-forest-light/10
+           focus:outline-none focus:border-forest-mid focus:ring-2 focus:ring-forest-light/15
            placeholder:text-ink-4
            transition-colors duration-150;
   }
-
   .form-label {
-    @apply block text-[11px] font-bold text-ink-3 uppercase tracking-wide mb-1.5;
+    @apply block text-[11px] font-semibold text-ink-3 uppercase tracking-wide mb-1.5;
   }
+  .form-select   { @apply form-input cursor-pointer; }
+  .form-textarea { @apply form-input resize-y min-h-[80px] leading-relaxed; }
 
-  .form-select {
-    @apply form-input cursor-pointer;
-  }
-
-  .form-textarea {
-    @apply form-input resize-y min-h-[80px] leading-relaxed;
-  }
-
-  /* Data table */
-  .data-table {
-    @apply w-full border-collapse;
-  }
-
+  /* Data table — tabular numerals so doses/vitals align; calmer chrome */
+  .data-table { @apply w-full border-collapse; }
   .data-table th {
-    @apply text-left px-3.5 py-2.5 text-[11px] font-bold text-ink-3
-           uppercase tracking-wide bg-bg border-b border-surface-border
+    @apply text-left px-3.5 py-2.5 text-[11px] font-semibold text-ink-3
+           uppercase tracking-wide bg-surface-2 border-b border-surface-border
            whitespace-nowrap;
   }
-
   .data-table td {
     @apply px-3.5 py-3 text-sm border-b border-surface-borderLt align-middle;
+    font-variant-numeric: tabular-nums;
   }
-
-  .data-table tbody tr {
-    @apply transition-colors duration-100 cursor-pointer;
-  }
-
-  .data-table tbody tr:hover td {
-    @apply bg-bg;
-  }
-
-  .data-table tbody tr:last-child td {
-    @apply border-b-0;
-  }
+  .data-table tbody tr { @apply transition-colors duration-100 cursor-pointer; }
+  .data-table tbody tr:hover td { @apply bg-forest-ghost/60; }
+  .data-table tbody tr:last-child td { @apply border-b-0; }
 
   /* Section title */
   .section-title {
-    @apply text-[11px] font-extrabold text-ink-3 uppercase tracking-widest
+    @apply text-[11px] font-bold text-ink-3 uppercase tracking-widest
            mb-3 pb-2.5 border-b border-surface-border;
   }
 
-  /* Page title */
+  /* Page title — Sora display */
   .page-title {
-    @apply font-display text-2xl font-semibold text-ink tracking-tight leading-tight;
+    @apply font-display text-[22px] font-semibold text-ink tracking-tight leading-tight;
   }
+  .page-subtitle { @apply text-sm text-ink-3 mt-1; }
 
-  .page-subtitle {
-    @apply text-sm text-ink-3 mt-1;
-  }
-
-  /* Pipeline column */
+  /* Pipeline (kanban) */
   .pipeline-col {
     @apply flex-1 min-w-[180px] border-r border-surface-border last:border-r-0 px-3;
   }
-
   .pipeline-card {
     @apply bg-surface border border-surface-border rounded p-3 mb-2
            cursor-pointer shadow-xs transition-all duration-150
-           hover:shadow hover:-translate-y-px;
+           hover:shadow-sm hover:border-forest-light/40 hover:-translate-y-px;
   }
+
+  /* Tabular numerals utility for inline clinical values */
+  .tabular { font-variant-numeric: tabular-nums; }
 }
