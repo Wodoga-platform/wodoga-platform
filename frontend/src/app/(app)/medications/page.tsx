@@ -7,7 +7,7 @@ import { Plus, AlertTriangle } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { medicationService, patientService } from '@/services';
-import { fmtDate, cn } from '@/utils';
+import { cn } from '@/utils';
 
 // A single clinical safety alert as returned by the backend prescribe endpoint.
 interface SafetyAlert {
@@ -110,7 +110,7 @@ export default function MedicationsPage() {
       </div>
 
       {lowRefills.length > 0 && (
-        <Alert variant="amber" className="mb-4">
+        <Alert type="warning" className="mb-4">
           {lowRefills.length} medication(s) low on refills — review needed.
         </Alert>
       )}
@@ -140,6 +140,28 @@ export default function MedicationsPage() {
 
         <div className="card">
           <div className="card-header"><div className="text-sm font-bold">Reconciliation</div></div>
+          <Gated permission="medications:reconcile">
+            <div className="p-3 border-b border-surface-border flex gap-2 items-center">
+              <select
+                className="form-select py-1.5 text-xs flex-1"
+                value={recoPatient}
+                onChange={(e) => setRecoPatient(e.target.value)}
+                aria-label="Select patient for reconciliation"
+              >
+                <option value="">Select patient…</option>
+                {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
+              </select>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!recoPatient}
+                loading={recoMut.isPending}
+                onClick={() => recoPatient && recoMut.mutate(recoPatient)}
+              >
+                Run
+              </Button>
+            </div>
+          </Gated>
           {recoResult ? (
             <div className="p-4">
               <div className="text-center mb-4">
