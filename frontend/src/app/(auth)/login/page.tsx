@@ -20,8 +20,25 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
+// ── Brand mark: "The Care Thread" ─────────────────────────────
+// One continuous stroke — the caregiver's path between homes.
+// Inlined so the login screen has zero asset dependencies.
+function WodogaMark({ size = 44 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <rect width="48" height="48" rx="12" fill="#0D5C46" />
+      <path
+        d="M10 15 L15.6 31.4 Q16.6 34.2 17.8 31.5 L22.9 20.1 Q24 17.8 25.1 20.1 L30.2 31.5 Q31.4 34.2 32.4 31.4 L38 15"
+        stroke="#FFFFFF" strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round" fill="none"
+      />
+    </svg>
+  );
+}
+
 // ════════════════════════════════════════════════════════════
-// LOGIN PAGE
+// LOGIN PAGE — Design System v2 "The Care Thread"
+// All auth logic (MFA flow, rate-limit / lockout / generic error
+// modes) is preserved verbatim from the hardened implementation.
 // ════════════════════════════════════════════════════════════
 export default function LoginPage() {
   const router    = useRouter();
@@ -125,107 +142,134 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-forest flex items-center justify-center p-4"
-         style={{
-           background: 'radial-gradient(ellipse 80% 60% at 10% 10%, rgba(64,145,108,0.18) 0%, transparent 60%), #1B4332',
-         }}>
+    <div
+      className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden"
+      style={{
+        background:
+          'radial-gradient(ellipse 90% 70% at 12% 8%, rgba(43,163,126,0.14) 0%, transparent 55%), linear-gradient(160deg, #0A3D2F 0%, #0D5C46 100%)',
+      }}
+    >
+      {/* Ambient care-thread — the signature element. Decorative only. */}
+      <svg
+        aria-hidden="true"
+        className="pointer-events-none absolute -left-24 top-1/2 -translate-y-1/2 w-[140%] max-w-none opacity-[0.07]"
+        viewBox="0 0 1200 400" fill="none"
+      >
+        <path
+          d="M-40 120 L200 330 Q235 365 268 332 L430 170 Q460 140 490 170 L650 332 Q683 365 718 330 L960 120"
+          stroke="#FFFFFF" strokeWidth="56" strokeLinecap="round" strokeLinejoin="round" fill="none"
+        />
+      </svg>
 
       {/* Split card */}
-      <div className="w-full max-w-[860px] min-h-[540px] flex rounded-xl overflow-hidden shadow-xl">
+      <div className="relative w-full max-w-[880px] min-h-[560px] flex rounded-xl overflow-hidden shadow-xl">
 
-        {/* ── Brand Panel ── */}
-        <div className="flex-1 p-12 flex flex-col justify-between"
-             style={{ background: 'rgba(255,255,255,0.05)', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+        {/* ── Brand panel ── */}
+        <div
+          className="hidden md:flex flex-1 p-12 flex-col justify-between"
+          style={{ background: 'rgba(255,255,255,0.045)', borderRight: '1px solid rgba(255,255,255,0.08)' }}
+        >
           <div>
-            {/* Logo */}
-            <div className="flex items-center gap-3 mb-10">
-              <div className="w-12 h-12 bg-gradient-to-br from-forest-light to-forest-mid
-                              rounded-xl flex items-center justify-center text-2xl shadow-lg">
-                🌿
-              </div>
+            <div className="flex items-center gap-3.5 mb-12">
+              <WodogaMark size={44} />
               <div>
-                <div className="font-display text-3xl font-bold text-white tracking-tight">Wodoga</div>
-                <div className="text-[11px] text-white/50 uppercase tracking-[2px] mt-0.5">Clinical Platform</div>
+                <div className="font-display text-[26px] font-bold text-white tracking-tight leading-none">Wodoga</div>
+                <div className="text-[10px] text-white/45 uppercase tracking-[2.5px] mt-1.5">Clinical Platform</div>
               </div>
             </div>
 
-            <h2 className="font-display text-[34px] font-semibold text-white leading-tight mb-4">
-              Enterprise care,<br />
-              <em className="text-forest-light not-italic">accessible pricing.</em>
+            <h2 className="font-display text-[30px] font-semibold text-white leading-[1.2] tracking-tight mb-4">
+              Built for care that happens
+              <br />
+              <span className="text-[#7FD4B5]">at the kitchen table.</span>
             </h2>
-            <p className="text-white/55 text-sm leading-relaxed max-w-[320px]">
-              The complete home health &amp; pharmaceutical management platform
-              built for clinics that deserve enterprise tools — without the price tag.
+            <p className="text-white/55 text-sm leading-relaxed max-w-[340px]">
+              The clinical platform for home health and pharmacy agencies —
+              documentation, medications, and billing that fit the way your
+              team actually works.
             </p>
 
-            <div className="mt-8 flex flex-col gap-2.5">
+            <div className="mt-9 flex flex-col gap-3">
               {[
-                'HIPAA-conscious patient records',
-                'Full care plan & SOAP documentation',
-                'Medication reconciliation & eligibility',
-                'Insurance claim management',
-                'OASIS-E compliance reporting',
+                'Visit documentation in minutes, not evenings',
+                'Allergy-checked prescribing with documented overrides',
+                'Medication reconciliation & insurance eligibility',
+                'OASIS-E assessments & claims in one place',
+                'Role-based access with a full audit trail',
               ].map(f => (
-                <div key={f} className="flex items-center gap-2.5 text-sm text-white/60">
-                  <div className="w-1.5 h-1.5 rounded-full bg-forest-light flex-shrink-0" />
+                <div key={f} className="flex items-center gap-3 text-sm text-white/65">
+                  <svg width="14" height="10" viewBox="0 0 14 10" fill="none" aria-hidden="true" className="flex-shrink-0">
+                    <path d="M1 2 L4.4 8 L7 3.5 L9.6 8 L13 2" stroke="#7FD4B5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </svg>
                   {f}
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="text-[10px] text-white/25 uppercase tracking-wider">
-            WODOGA © 2025 · HIPAA CONSCIOUS · SOC 2 READY
+          <div className="text-[10px] text-white/30 uppercase tracking-[1.5px]">
+            Wodoga © 2026 · HIPAA-conscious by design
           </div>
         </div>
 
-        {/* ── Form Panel ── */}
-        <div className="w-[420px] bg-white p-12 flex flex-col justify-center">
+        {/* ── Form panel ── */}
+        <div className="w-full md:w-[420px] bg-surface p-10 md:p-12 flex flex-col justify-center">
+
+          {/* Mobile-only compact brand */}
+          <div className="md:hidden flex items-center gap-3 mb-8">
+            <WodogaMark size={36} />
+            <span className="font-display text-xl font-bold text-ink tracking-tight">Wodoga</span>
+          </div>
 
           {/* ── Step 1: Credentials ── */}
           {step === 'credentials' && (
             <>
-              <h1 className="font-display text-2xl font-semibold text-ink mb-1 tracking-tight">Sign in</h1>
+              <h1 className="font-display text-[24px] font-semibold text-ink mb-1 tracking-tight">Sign in</h1>
               <p className="text-sm text-ink-3 mb-7">Secure access to your organization</p>
 
               {error && <Alert type="error" className="mb-4">{error}</Alert>}
 
-              <form onSubmit={handleSubmit(onSubmitCredentials)} className="space-y-4">
+              <form onSubmit={handleSubmit(onSubmitCredentials)} className="space-y-4" noValidate>
                 <div>
-                  <label className="form-label">Email Address</label>
+                  <label htmlFor="login-email" className="form-label">Email address</label>
                   <input
+                    id="login-email"
                     type="email"
                     autoComplete="email"
                     placeholder="you@organization.com"
                     className="form-input"
+                    aria-invalid={!!errors.email}
                     {...register('email')}
                   />
-                  {errors.email && <p className="text-xs text-red mt-1">{errors.email.message}</p>}
+                  {errors.email && <p className="text-xs text-red mt-1" role="alert">{errors.email.message}</p>}
                 </div>
 
                 <div>
-                  <label className="form-label">Password</label>
+                  <label htmlFor="login-password" className="form-label">Password</label>
                   <div className="relative">
                     <input
+                      id="login-password"
                       type={showPass ? 'text' : 'password'}
                       autoComplete="current-password"
                       placeholder="••••••••"
                       className="form-input pr-10"
+                      aria-invalid={!!errors.password}
                       {...register('password')}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPass(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink"
+                      aria-label={showPass ? 'Hide password' : 'Show password'}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink transition-colors"
                     >
                       {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
-                  {errors.password && <p className="text-xs text-red mt-1">{errors.password.message}</p>}
+                  {errors.password && <p className="text-xs text-red mt-1" role="alert">{errors.password.message}</p>}
                 </div>
 
                 <div className="flex justify-end -mt-1">
-                  <a href="/forgot-password" className="text-xs text-forest hover:underline font-medium">
+                  <a href="/forgot-password" className="text-xs text-forest hover:text-forest-mid hover:underline font-medium transition-colors">
                     Forgot password?
                   </a>
                 </div>
@@ -236,12 +280,12 @@ export default function LoginPage() {
                   loading={loading}
                   className="w-full justify-center py-3 text-sm"
                 >
-                  Continue →
+                  Sign in
                 </Button>
               </form>
 
-              <div className="mt-6 flex items-center gap-2 justify-center text-xs text-ink-4">
-                <Shield size={11} />
+              <div className="mt-7 flex items-center gap-2 justify-center text-xs text-ink-4">
+                <Shield size={11} aria-hidden="true" />
                 Protected by two-factor authentication
               </div>
             </>
@@ -250,11 +294,10 @@ export default function LoginPage() {
           {/* ── Step 2: MFA ── */}
           {step === 'mfa' && (
             <>
-              <div className="w-12 h-12 bg-forest-ghost rounded-xl flex items-center justify-center
-                              text-2xl mb-5">
-                🔐
+              <div className="w-12 h-12 bg-forest-ghost border border-forest-pale rounded-lg flex items-center justify-center mb-5">
+                <Shield size={20} className="text-forest" aria-hidden="true" />
               </div>
-              <h1 className="font-display text-2xl font-semibold text-ink mb-1 tracking-tight">
+              <h1 className="font-display text-[24px] font-semibold text-ink mb-1 tracking-tight">
                 Verify your identity
               </h1>
               <p className="text-sm text-ink-3 mb-7">
@@ -263,8 +306,7 @@ export default function LoginPage() {
 
               {error && <Alert type="error" className="mb-4">{error}</Alert>}
 
-              {/* 6-digit input */}
-              <div className="flex gap-2 justify-center mb-6">
+              <div className="flex gap-2 justify-center mb-6" role="group" aria-label="6-digit verification code">
                 {mfaCode.map((digit, i) => (
                   <input
                     key={i}
@@ -273,11 +315,12 @@ export default function LoginPage() {
                     inputMode="numeric"
                     maxLength={1}
                     value={digit}
+                    aria-label={`Digit ${i + 1} of 6`}
                     onChange={e => onMFAInput(i, e.target.value)}
                     onKeyDown={e => onMFAKeyDown(i, e)}
                     className="w-11 h-14 text-center text-2xl font-mono font-medium
-                               border border-surface-border rounded bg-bg text-ink
-                               focus:outline-none focus:border-forest-light focus:ring-2 focus:ring-forest-light/10
+                               border border-surface-border rounded bg-surface text-ink
+                               focus:outline-none focus:border-forest-mid focus:ring-2 focus:ring-forest-light/15
                                transition-colors"
                   />
                 ))}
