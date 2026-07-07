@@ -1,14 +1,32 @@
 /** @type {import('tailwindcss').Config} */
+//
+// Wodoga Design System v2 — "The Care Thread"
+// ─────────────────────────────────────────────
+// IMPORTANT ARCHITECTURE NOTE: every token NAME below is preserved from v1.
+// All 12+ app pages reference these semantic names (text-ink-3, bg-surface-2,
+// border-red-pale, ...). Restyling happens by evolving the VALUES only, which
+// restyles the whole app in one file with zero page-file churn.
+//
+// Direction: clinical precision. Cool, exact neutrals with a faint green
+// undertone; a deeper evergreen primary; crisper radii and shadows.
+// Full rationale + hex table in BRAND_DESIGN_SYSTEM.md.
 module.exports = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
-        // Wodoga brand palette — matches the existing prototype
-        forest:  { DEFAULT: '#1B4332', mid: '#2D6A4F', light: '#40916C', pale: '#D8F3DC', ghost: '#F0FAF2' },
-        ink:     { DEFAULT: '#1A1917', 2: '#4A4845', 3: '#8A8784', 4: '#B8B5B0' },
-        surface: { DEFAULT: '#FFFFFF', 2: '#F2F0EC', border: '#E4E1DA', borderLt: '#EDEBE6' },
-        bg:      '#F7F6F3',
+        // Primary — evergreen, deepened & cooled from v1 forest.
+        // DEFAULT passes AA on white for text and button fills.
+        forest:  { DEFAULT: '#0D5C46', mid: '#12805F', light: '#2BA37E', pale: '#D6F2E7', ghost: '#F2FBF7' },
+
+        // Neutrals — cool precision with a faint green undertone.
+        // ink = text ramp (1 strongest → 4 faintest)
+        ink:     { DEFAULT: '#141816', 2: '#3F4643', 3: '#79827D', 4: '#AEB6B1' },
+        surface: { DEFAULT: '#FFFFFF', 2: '#F3F5F4', border: '#E2E6E4', borderLt: '#ECEFED' },
+        bg:      '#F8FAF9',
+
+        // Status hues — kept from v1 (semantically correct, AA-checked);
+        // identity change lives in neutrals + primary, not alert colors.
         blue:    { DEFAULT: '#1E3A8A', mid: '#2563EB', pale: '#DBEAFE', ghost: '#EFF6FF' },
         amber:   { DEFAULT: '#92400E', mid: '#D97706', pale: '#FEF3C7', ghost: '#FFFBEB' },
         red:     { DEFAULT: '#991B1B', mid: '#DC2626', pale: '#FEE2E2', ghost: '#FEF2F2' },
@@ -16,22 +34,27 @@ module.exports = {
         teal:    { DEFAULT: '#134E4A', mid: '#0D9488', pale: '#CCFBF1', ghost: '#F0FDFA' },
       },
       fontFamily: {
-        display: ['"Playfair Display"', 'Georgia', 'serif'],
-        sans:    ['Manrope', 'system-ui', 'sans-serif'],
+        // Sora: geometric, quietly technical display — replaces the editorial
+        // serif. Inter: UI/body — chosen for sub-14px legibility and tabular
+        // numerals (vitals & doses align in columns). DM Mono retained.
+        display: ['Sora', 'system-ui', 'sans-serif'],
+        sans:    ['Inter', 'system-ui', 'sans-serif'],
         mono:    ['"DM Mono"', 'monospace'],
       },
       boxShadow: {
-        xs:  '0 1px 2px rgba(0,0,0,0.05)',
-        sm:  '0 1px 4px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-        DEFAULT: '0 2px 8px rgba(0,0,0,0.07), 0 4px 20px rgba(0,0,0,0.05)',
-        lg:  '0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)',
-        xl:  '0 20px 60px rgba(0,0,0,0.14), 0 4px 16px rgba(0,0,0,0.08)',
+        // Crisper, cooler elevation: tighter blur, green-tinted ink.
+        xs:  '0 1px 2px rgba(13,23,19,0.05)',
+        sm:  '0 1px 3px rgba(13,23,19,0.07), 0 1px 8px rgba(13,23,19,0.03)',
+        DEFAULT: '0 2px 6px rgba(13,23,19,0.08), 0 4px 16px rgba(13,23,19,0.04)',
+        lg:  '0 6px 24px rgba(13,23,19,0.10), 0 2px 6px rgba(13,23,19,0.06)',
+        xl:  '0 16px 48px rgba(13,23,19,0.14), 0 4px 12px rgba(13,23,19,0.08)',
       },
       borderRadius: {
-        sm:  '6px',
-        DEFAULT: '10px',
-        lg:  '14px',
-        xl:  '20px',
+        // One step crisper across the board (10 → 8 default).
+        sm:  '5px',
+        DEFAULT: '8px',
+        lg:  '12px',
+        xl:  '16px',
       },
       animation: {
         'slide-in-right': 'slideInRight 0.25s ease',
