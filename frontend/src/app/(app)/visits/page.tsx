@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, MapPin, X } from 'lucide-react';
+import { Home, MapPin, Plus, X } from 'lucide-react';
 import { Button, Badge, Avatar, EmptyState, PageLoader, InfoField, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { visitService, patientService, staffService } from '@/services';
@@ -148,7 +148,7 @@ export default function VisitsPage() {
         <div className={cn('flex-1 min-w-0', selected ? 'max-w-[calc(100%-420px)]' : '')}>
           <div className="card">
             {isLoading ? <PageLoader /> : visits.length === 0 ? (
-              <EmptyState icon="🏠" title={`No ${tab} visits`}
+              <EmptyState icon={Home} title={`No ${tab} visits`}
                 action={
                   <Gated permission="visits:create">
                     <Button variant="primary" size="sm" onClick={() => setSchedOpen(true)}>Schedule Visit</Button>
