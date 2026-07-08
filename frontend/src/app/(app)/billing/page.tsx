@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus } from 'lucide-react';
+import { CheckCircle2, Clock, CreditCard, Plus, XCircle } from 'lucide-react';
 import { Button, Badge, StatCard, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { billingService, patientService } from '@/services';
@@ -61,14 +61,14 @@ export default function BillingPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-6">
-        <StatCard label="Pending" value={summary?.pending_count || 0} icon="⏳" accent="amber" />
-        <StatCard label="Approved" value={summary?.approved_count || 0} icon="✅" accent="green" />
-        <StatCard label="Denied" value={summary?.denied_count || 0} icon="❌" accent="red" />
+        <StatCard label="Pending" value={summary?.pending_count || 0} icon={Clock} accent="amber" />
+        <StatCard label="Approved" value={summary?.approved_count || 0} icon={CheckCircle2} accent="green" />
+        <StatCard label="Denied" value={summary?.denied_count || 0} icon={XCircle} accent="red" />
       </div>
 
       <div className="card">
         <div className="card-header"><div className="text-sm font-bold">All Claims</div></div>
-        {isLoading ? <PageLoader /> : claims.length === 0 ? <EmptyState icon="💳" title="No claims submitted" /> : (
+        {isLoading ? <PageLoader /> : claims.length === 0 ? <EmptyState icon={CreditCard} title="No claims submitted" /> : (
           <table className="data-table">
             <thead><tr><th>Patient</th><th>Claim #</th><th>Service</th><th>Amount</th><th>Insurance</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
