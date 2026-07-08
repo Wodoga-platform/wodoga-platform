@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { Search, Plus, Upload } from 'lucide-react';
+import { Home, Pill, Plus, Search, Upload, Users } from 'lucide-react';
 import {
   Button, Badge, Avatar, EmptyState, PageLoader,
   StatCard, InfoField, Alert, Gated,
@@ -191,7 +191,7 @@ export default function PatientsPage() {
 
             {isLoading ? <PageLoader /> : patients.length === 0 ? (
               <EmptyState
-                icon="👥"
+                icon={Users}
                 title="No patients found"
                 description={search ? `No results for "${search}"` : 'Add your first patient to get started.'}
                 action={
@@ -372,7 +372,7 @@ export default function PatientsPage() {
                 {detailTab === 'meds' && (
                   <div>
                     {summary?.medications.length === 0 ? (
-                      <EmptyState icon="💊" title="No prescriptions" />
+                      <EmptyState icon={Pill} title="No prescriptions" />
                     ) : (
                       summary?.medications.map(m => (
                         <div key={m.id} className="flex gap-3 p-3 bg-bg rounded mb-2 border border-surface-border">
@@ -396,7 +396,7 @@ export default function PatientsPage() {
                 {detailTab === 'visits' && (
                   <div>
                     {summary?.visits.length === 0 ? (
-                      <EmptyState icon="🏠" title="No visits" />
+                      <EmptyState icon={Home} title="No visits" />
                     ) : (
                       summary?.visits.map(v => (
                         <div key={v.id} className="flex gap-2.5 py-3 border-b border-surface-borderLt last:border-0">
