@@ -2,7 +2,7 @@
 /** Wodoga — Audit Log Page */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { Download, Search } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader } from '@/components/ui';
 import { auditService } from '@/services';
 import { fmtDateTime, ROLE_COLOR, cn } from '@/utils';
@@ -59,7 +59,7 @@ export default function AuditPage() {
           </div>
         </div>
 
-        {isLoading ? <PageLoader /> : logs.length === 0 ? <EmptyState icon="🔍" title="No events found" /> : (
+        {isLoading ? <PageLoader /> : logs.length === 0 ? <EmptyState icon={Search} title="No events found" /> : (
           <table className="data-table">
             <thead><tr><th>Timestamp</th><th>User</th><th>Role</th><th>Action</th><th>Detail</th><th>IP</th><th>Result</th></tr></thead>
             <tbody>
