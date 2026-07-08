@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { CreditCard, Home, Pill, Users } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { format, subDays, parseISO, isToday } from 'date-fns';
 import Link from 'next/link';
@@ -91,10 +92,10 @@ export default function DashboardPage() {
   const pendingActions = useMemo(() => {
     const actions = [];
     const missingSoap = recentVisits.filter(v => v.status === 'completed' && !v.has_soap_note).length;
-    if (missingSoap)            actions.push({ icon: '📝', text: `${missingSoap} completed visit(s) missing SOAP notes`, href: '/visits' });
-    if (billingSummary?.denied_count) actions.push({ icon: '❌', text: `${billingSummary.denied_count} denied claim(s) — resubmission needed`, href: '/billing' });
-    if (meds?.filter(m => m.refills_remaining === 0).length) actions.push({ icon: '💊', text: 'Medications with 0 refills need authorization', href: '/medications' });
-    if (referrals?.length)      actions.push({ icon: '🔗', text: `${referrals.length} new referral(s) need contact`, href: '/referrals' });
+    if (missingSoap)            actions.push({ text: `${missingSoap} completed visit(s) missing SOAP notes`, href: '/visits' });
+    if (billingSummary?.denied_count) actions.push({ text: `${billingSummary.denied_count} denied claim(s) — resubmission needed`, href: '/billing' });
+    if (meds?.filter(m => m.refills_remaining === 0).length) actions.push({ text: 'Medications with 0 refills need authorization', href: '/medications' });
+    if (referrals?.length)      actions.push({ text: `${referrals.length} new referral(s) need contact`, href: '/referrals' });
     return actions;
   }, [recentVisits, billingSummary, meds, referrals]);
 
@@ -113,7 +114,7 @@ export default function DashboardPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="page-title">
-            {greeting()}, {user?.first_name} 👋
+            {greeting()}, {user?.first_name}
           </h1>
           <p className="page-subtitle">
             {format(new Date(), 'EEEE, MMMM d, yyyy')} · {user?.role && user.role.replace('_', ' ')}
@@ -135,7 +136,7 @@ export default function DashboardPage() {
           <div className="p-4">
             <div className="flex items-center justify-between mb-2">
               <strong className="text-sm" style={{ color: 'var(--red, #b91c1c)' }}>
-                ⚠ {overdueVisits.length} patient{overdueVisits.length === 1 ? '' : 's'} not seen — overdue visits
+                {overdueVisits.length} patient{overdueVisits.length === 1 ? '' : 's'} not seen — overdue visits
               </strong>
               <Link href="/visits" className="text-xs font-bold underline text-ink-2">View all visits →</Link>
             </div>
@@ -162,7 +163,7 @@ export default function DashboardPage() {
 
       {vitalsAlerts && vitalsAlerts.length > 0 && (
         <Alert type="error" className="mb-5">
-          <strong>⚠ {vitalsAlerts.length} vital alert(s) today</strong> — patients with readings outside
+          <strong>{vitalsAlerts.length} vital alert(s) today</strong> — patients with readings outside
           normal range. <Link href="/vitals" className="font-bold underline">Review now →</Link>
         </Alert>
       )}
@@ -182,28 +183,28 @@ export default function DashboardPage() {
           value={totalPatients}
           foot="Active records"
           footUp
-          icon="👥"
+          icon={Users}
           accent="green"
         />
         <StatCard
           label="Visits Today"
           value={todayVisits.length}
           foot={`${completedToday} done · ${scheduledToday} pending`}
-          icon="🏠"
+          icon={Home}
           accent="blue"
         />
         <StatCard
           label="Active Rx"
           value={activeRx}
           foot={`${meds?.filter(m => m.refills_remaining <= 1).length || 0} need refill`}
-          icon="💊"
+          icon={Pill}
           accent="purple"
         />
         <StatCard
           label="Pending Claims"
           value={pendingClaims}
           foot={`$${(billingSummary?.total_billed || 0).toLocaleString()} total billed`}
-          icon="💳"
+          icon={CreditCard}
           accent="amber"
         />
       </div>
@@ -224,7 +225,7 @@ export default function DashboardPage() {
           </div>
 
           {widgetVisits.length === 0 ? (
-            <EmptyState icon="🏠" title="No visits in the last 7 days" description="Schedule a visit to get started." />
+            <EmptyState icon={Home} title="No visits in the last 7 days" description="Schedule a visit to get started." />
           ) : (
             <table className="data-table">
               <thead>
@@ -317,13 +318,13 @@ export default function DashboardPage() {
             </div>
             <div className="px-5">
               {pendingActions.length === 0 ? (
-                <div className="py-5 text-center text-sm text-ink-3">✅ No pending actions</div>
+                <div className="py-5 text-center text-sm text-ink-3">No pending actions</div>
               ) : (
                 pendingActions.map((a, i) => (
                   <Link key={i} href={a.href}>
                     <div className="flex items-center gap-3 py-3 border-b border-surface-borderLt
                                     last:border-b-0 hover:bg-bg -mx-5 px-5 transition-colors cursor-pointer">
-                      <span className="text-lg">{a.icon}</span>
+                      <span className="w-2 h-2 rounded-full bg-amber-mid flex-shrink-0" aria-hidden="true" />
                       <span className="flex-1 text-sm font-medium">{a.text}</span>
                       <span className="text-ink-3 text-sm">→</span>
                     </div>
