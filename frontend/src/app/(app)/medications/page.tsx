@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Pill, Plus, Search } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { medicationService, patientService } from '@/services';
@@ -119,7 +119,7 @@ export default function MedicationsPage() {
         <div className="col-span-2 card">
           <div className="card-header"><div className="text-sm font-bold">Active Medications</div></div>
           {isLoading ? <PageLoader /> : meds.length === 0 ? (
-            <EmptyState icon="💊" title="No medications" description="Prescribed medications will appear here." />
+            <EmptyState icon={Pill} title="No medications" description="Prescribed medications will appear here." />
           ) : (
             <table className="data-table">
               <thead><tr><th>Drug</th><th>Dosage</th><th>Frequency</th><th>Refills</th><th>Prescriber</th></tr></thead>
@@ -196,7 +196,7 @@ export default function MedicationsPage() {
               )}
             </div>
           ) : (
-            <EmptyState icon="🔍" title="Select a patient" description="Run reconciliation to review the medication list" />
+            <EmptyState icon={Search} title="Select a patient" description="Run reconciliation to review the medication list" />
           )}
         </div>
       </div>
