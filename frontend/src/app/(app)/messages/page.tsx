@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, Lock, Reply, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Lock, MessageSquare, Plus, Reply } from 'lucide-react';
 import { Button, Badge, EmptyState, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { messageService, staffService } from '@/services';
@@ -107,7 +107,7 @@ export default function MessagesPage() {
             {unreadCount > 0 && <Badge variant="red">{unreadCount} unread</Badge>}
           </div>
         </div>
-        {inboxMessages.length === 0 ? <EmptyState icon="💬" title="No messages" description="Your inbox is empty." /> : (
+        {inboxMessages.length === 0 ? <EmptyState icon={MessageSquare} title="No messages" description="Your inbox is empty." /> : (
           <div>
             {inboxMessages.map((m: any) => (
               <div key={m.id}
