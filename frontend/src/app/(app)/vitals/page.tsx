@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, X } from 'lucide-react';
+import { HeartPulse, Plus, X } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { vitalsService, patientService } from '@/services';
@@ -57,7 +57,7 @@ export default function VitalsPage() {
 
       <div className="card">
         <div className="card-header"><div className="text-sm font-bold">Recent Alerts (7 days)</div><div className="text-xs text-ink-3">{alerts.length} flagged readings</div></div>
-        {alerts.length === 0 ? <EmptyState icon="💚" title="No alerts" description="All vitals readings are within normal range." /> : (
+        {alerts.length === 0 ? <EmptyState icon={HeartPulse} title="No alerts" description="All vitals readings are within normal range." /> : (
           <table className="data-table">
             <thead><tr><th>Patient</th><th>Recorded</th><th>BP</th><th>O₂ Sat</th><th>Heart Rate</th><th>Glucose</th><th>Temp</th><th>Flags</th><th></th></tr></thead>
             <tbody>
