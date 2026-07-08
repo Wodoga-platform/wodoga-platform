@@ -7,11 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import {
-  ArrowLeft, Activity, Pill, Home, ClipboardList, FileText,
-  Receipt, Clock, Truck, AlertTriangle, Image as ImageIcon,
-  Upload, Trash2, X as XIcon, Plus, UserMinus, Pencil, UserPlus, Copy,
-} from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, ClipboardList, Clock, Copy, CreditCard, FileText, HeartPulse, Home, Image, Image as ImageIcon, Pencil, Pill, Plus, Receipt, Search, Trash2, Truck, Upload, UserMinus, UserPlus, X as XIcon } from 'lucide-react';
 import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, documentService, vitalsService, visitService, staffService, portalService } from '@/services';
@@ -267,7 +263,7 @@ export default function PatientChartPage() {
   };
 
   if (isLoading) return <PageLoader />;
-  if (!chart)    return <EmptyState icon="🔍" title="Patient not found" />;
+  if (!chart)    return <EmptyState icon={Search} title="Patient not found" />;
 
   const p = chart.patient;
   const statusBadge = PATIENT_STATUS_BADGE[p.status as keyof typeof PATIENT_STATUS_BADGE]
@@ -385,7 +381,7 @@ export default function PatientChartPage() {
         <div className="card p-5">
           <div className="section-title">Complete Patient History</div>
           {timeline.length === 0 ? (
-            <EmptyState icon="📋" title="No history yet" description="Events will appear here as care is delivered." />
+            <EmptyState icon={ClipboardList} title="No history yet" description="Events will appear here as care is delivered." />
           ) : (
             <div className="relative pl-6">
               <div className="absolute left-[7px] top-1 bottom-1 w-px bg-surface-border" />
@@ -428,7 +424,7 @@ export default function PatientChartPage() {
             </Button>
           </div>
           {chart.visits.length === 0 ? (
-            <div className="card"><EmptyState icon="🏠" title="No visits recorded" /></div>
+            <div className="card"><EmptyState icon={Home} title="No visits recorded" /></div>
           ) : chart.visits.map((v: any) => (
             <div key={v.id} className="card p-4">
               <div className="flex items-start justify-between mb-2">
@@ -514,7 +510,7 @@ export default function PatientChartPage() {
           )}
 
           <div className="card">
-          {chart.vitals.length === 0 ? <EmptyState icon="❤️" title="No vitals recorded" /> : (
+          {chart.vitals.length === 0 ? <EmptyState icon={HeartPulse} title="No vitals recorded" /> : (
             <table className="data-table">
               <thead><tr><th>Date</th><th>BP</th><th>HR</th><th>O₂</th><th>Temp</th><th>Resp</th><th>Weight</th><th>Pain</th><th>Flags</th></tr></thead>
               <tbody>
@@ -548,7 +544,7 @@ export default function PatientChartPage() {
         <div className="space-y-4">
           <div className="card">
             <div className="card-header"><div className="text-sm font-bold">Medications</div></div>
-            {chart.medications.length === 0 ? <EmptyState icon="💊" title="No medications" /> : (
+            {chart.medications.length === 0 ? <EmptyState icon={Pill} title="No medications" /> : (
               <table className="data-table">
                 <thead><tr><th>Drug</th><th>Dosage</th><th>Frequency</th><th>Prescriber</th><th>Refills</th><th>Status</th></tr></thead>
                 <tbody>
@@ -597,7 +593,7 @@ export default function PatientChartPage() {
       {tab === 'oasis' && (
         <div className="space-y-3">
           {chart.oasis.length === 0 ? (
-            <div className="card"><EmptyState icon="📋" title="No OASIS assessments" /></div>
+            <div className="card"><EmptyState icon={ClipboardList} title="No OASIS assessments" /></div>
           ) : chart.oasis.map((o: any) => (
             <div key={o.id} className="card p-4">
               <div className="flex items-center justify-between">
@@ -616,7 +612,7 @@ export default function PatientChartPage() {
       {/* ── Claims ── */}
       {tab === 'claims' && (
         <div className="card">
-          {chart.claims.length === 0 ? <EmptyState icon="💳" title="No claims filed" /> : (
+          {chart.claims.length === 0 ? <EmptyState icon={CreditCard} title="No claims filed" /> : (
             <table className="data-table">
               <thead><tr><th>Claim #</th><th>Service</th><th>Amount</th><th>Insurance</th><th>Date</th><th>Status</th></tr></thead>
               <tbody>
@@ -686,7 +682,7 @@ export default function PatientChartPage() {
 
           {/* Gallery */}
           {documents.length === 0 ? (
-            <div className="card"><EmptyState icon="🖼️" title="No documents yet"
+            <div className="card"><EmptyState icon={Image} title="No documents yet"
               description="Upload wound-care photos, signed forms, or other clinical documents above." /></div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
