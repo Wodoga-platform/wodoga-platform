@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus } from 'lucide-react';
+import { ClipboardList, Plus } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { oasisService, patientService } from '@/services';
@@ -69,7 +69,7 @@ export default function OASISPage() {
       <div className="card">
         <div className="card-header"><div className="text-sm font-bold">All Assessments</div></div>
         {isLoading ? <PageLoader /> : assessments.length === 0 ? (
-          <EmptyState icon="📋" title="No assessments submitted" description="Submit a Start of Care assessment for new Medicare patients." />
+          <EmptyState icon={ClipboardList} title="No assessments submitted" description="Submit a Start of Care assessment for new Medicare patients." />
         ) : (
           <table className="data-table">
             <thead><tr><th>Patient</th><th>Type</th><th>Date</th><th>Clinician</th><th>Status</th></tr></thead>
