@@ -1,5 +1,6 @@
 'use client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bell } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Badge, EmptyState, PageLoader } from '@/components/ui';
 import { notificationService } from '@/services';
@@ -50,7 +51,7 @@ export default function NotificationsPage() {
 
       <div className="card">
         {isLoading ? <PageLoader /> : notifications.length === 0 ? (
-          <EmptyState icon="🔔" title="All caught up" description="No notifications to show." />
+          <EmptyState icon={Bell} title="All caught up" description="No notifications to show." />
         ) : (
           <div>
             {notifications.map(n => (
