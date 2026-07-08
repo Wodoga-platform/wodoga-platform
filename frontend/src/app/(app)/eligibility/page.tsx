@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus } from 'lucide-react';
+import { CheckCircle2, ClipboardList, Plus, Search } from 'lucide-react';
 import { Button, Badge, EmptyState, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { eligibilityService, patientService, staffService } from '@/services';
@@ -110,14 +110,14 @@ export default function EligibilityPage() {
             </div>
           ) : (
             <div className="card flex items-center justify-center h-full min-h-[280px]">
-              <EmptyState icon="✅" title="Run a check" description="Select a patient and verify their insurance eligibility" />
+              <EmptyState icon={CheckCircle2} title="Run a check" description="Select a patient and verify their insurance eligibility" />
             </div>
           )}
         </div>
       </div>
       <div className="card">
         <div className="card-header"><div className="text-sm font-bold">Recent Eligibility Checks</div></div>
-        {!history?.length ? <EmptyState icon="🔍" title="No checks run yet" /> : (
+        {!history?.length ? <EmptyState icon={Search} title="No checks run yet" /> : (
           <table className="data-table"><thead><tr><th>Patient</th><th>Insurance</th><th>Member ID</th><th>Checked</th><th>Result</th></tr></thead>
           <tbody>{history.map(e => {
             const eb = ELIGIBILITY_BADGE[e.result];
@@ -141,7 +141,7 @@ export default function EligibilityPage() {
           </Gated>
         </div>
         {!contracts?.length ? (
-          <EmptyState icon="📋" title="No contracts yet" description="Add which insurance plans your providers are contracted with." />
+          <EmptyState icon={ClipboardList} title="No contracts yet" description="Add which insurance plans your providers are contracted with." />
         ) : (
           <table className="data-table">
             <thead><tr><th>Provider</th><th>Insurance</th><th>Plan</th><th>Type</th><th>Payer ID</th><th>New Patients</th></tr></thead>
