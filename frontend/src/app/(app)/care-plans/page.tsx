@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Plus, Pencil } from 'lucide-react';
+import { ClipboardList, Pencil, Plus } from 'lucide-react';
 import { Button, Badge, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { carePlanService, patientService } from '@/services';
@@ -67,7 +67,7 @@ export default function CarePlansPage() {
 
       <div className="card">
         <div className="card-header"><div className="text-sm font-bold">Active Care Plans</div><div className="text-xs text-ink-3">{plans.length} plans</div></div>
-        {isLoading ? <PageLoader /> : plans.length === 0 ? <EmptyState icon="📋" title="No care plans" description="Create a care plan for an active patient." /> : (
+        {isLoading ? <PageLoader /> : plans.length === 0 ? <EmptyState icon={ClipboardList} title="No care plans" description="Create a care plan for an active patient." /> : (
           <table className="data-table">
             <thead><tr><th>Patient</th><th>Diagnosis</th><th>Physician</th><th>Start</th><th>Frequency</th><th>Review Date</th><th>Status</th><th></th></tr></thead>
             <tbody>
