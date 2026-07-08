@@ -1,6 +1,7 @@
 'use client';
 /** Wodoga — Patient Portal Dashboard */
 import { useState } from 'react';
+import { Home, MessageSquare, Pill } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
@@ -75,7 +76,7 @@ export default function PortalDashboard() {
           {/* Upcoming visits */}
           <div className="card">
             <div className="card-header"><div className="text-sm font-bold">Upcoming Visits</div></div>
-            {upcoming.length === 0 ? <EmptyState icon="🏠" title="No upcoming visits" /> : (
+            {upcoming.length === 0 ? <EmptyState icon={Home} title="No upcoming visits" /> : (
               <div className="divide-y divide-surface-borderLt">
                 {upcoming.map((v: any) => (
                   <div key={v.id} className="px-5 py-3 flex items-center gap-3">
@@ -97,7 +98,7 @@ export default function PortalDashboard() {
           {/* Medications */}
           <div className="card">
             <div className="card-header"><div className="text-sm font-bold">My Medications</div></div>
-            {!meds?.length ? <EmptyState icon="💊" title="No active medications" /> : (
+            {!meds?.length ? <EmptyState icon={Pill} title="No active medications" /> : (
               <div className="divide-y divide-surface-borderLt">
                 {meds.map((m: any) => (
                   <div key={m.drug_name} className="px-5 py-3 flex items-start gap-2.5">
@@ -149,7 +150,7 @@ export default function PortalDashboard() {
                 <Button size="xs" variant="primary" onClick={() => setMsgOpen(true)}>Message Care Team</Button>
               </div>
             </div>
-            {!messages?.length ? <EmptyState icon="💬" title="No messages" /> : (
+            {!messages?.length ? <EmptyState icon={MessageSquare} title="No messages" /> : (
               <div className="divide-y divide-surface-borderLt">
                 {messages.slice(0, 4).map((m: any) => (
                   <div key={m.id} className={cn('px-5 py-3', !m.is_read && 'bg-forest-ghost/20')}>
