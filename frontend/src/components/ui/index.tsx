@@ -4,6 +4,7 @@
  */
 
 import type { ReactNode, ButtonHTMLAttributes } from 'react';
+import { Inbox, type LucideIcon } from 'lucide-react';
 import { cn, type BadgeVariant, initials, avatarColor } from '@/utils';
 
 // ════════════════════════════════════════════════════════════
@@ -114,18 +115,20 @@ export function Spinner({ size = 'md', className }: SpinnerProps) {
 // EMPTY STATE
 // ════════════════════════════════════════════════════════════
 interface EmptyStateProps {
-  icon?:        string;
+  icon?:        LucideIcon;
   title:        string;
   description?: string;
   action?:      ReactNode;
 }
 
-export function EmptyState({ icon = '📭', title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon: Icon = Inbox, title, description, action }: EmptyStateProps) {
   return (
     <div className="text-center py-12 px-6">
-      <div className="text-4xl mb-3 opacity-40">{icon}</div>
-      <div className="text-sm font-bold text-ink-2 mb-1">{title}</div>
-      {description && <p className="text-xs text-ink-3 mb-4">{description}</p>}
+      <div className="flex justify-center mb-3">
+        <Icon size={28} className="text-ink-4" strokeWidth={1.5} aria-hidden="true" />
+      </div>
+      <div className="text-sm font-semibold text-ink-2 mb-1">{title}</div>
+      {description && <p className="text-xs text-ink-3 mb-4 max-w-xs mx-auto leading-relaxed">{description}</p>}
       {action}
     </div>
   );
@@ -180,7 +183,7 @@ interface StatCardProps {
   value:    string | number;
   foot?:    string;
   footUp?:  boolean;
-  icon?:    string;
+  icon?:    LucideIcon;
   accent?:  StatAccent;
 }
 
@@ -202,21 +205,21 @@ const STAT_ICON_BG: Record<StatAccent, string> = {
   teal:   'bg-teal-ghost',
 };
 
-export function StatCard({ label, value, foot, footUp, icon, accent = 'green' }: StatCardProps) {
+export function StatCard({ label, value, foot, footUp, icon: Icon, accent = 'green' }: StatCardProps) {
   return (
     <div className="card relative overflow-hidden">
       {/* Top accent bar */}
       <div className={cn('absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r', STAT_ACCENT_BAR[accent])} />
       <div className="p-5 pt-6">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-[11px] font-bold text-ink-3 uppercase tracking-wide">{label}</div>
-          {icon && (
-            <div className={cn('w-9 h-9 rounded flex items-center justify-center text-lg', STAT_ICON_BG[accent])}>
-              {icon}
+          <div className="text-[11px] font-semibold text-ink-3 uppercase tracking-wide">{label}</div>
+          {Icon && (
+            <div className={cn('w-9 h-9 rounded-md flex items-center justify-center', STAT_ICON_BG[accent])}>
+              <Icon size={17} strokeWidth={2} aria-hidden="true" />
             </div>
           )}
         </div>
-        <div className="font-display text-[34px] font-semibold text-ink leading-none tracking-tight">
+        <div className="font-display text-[34px] font-semibold text-ink leading-none tracking-tight tabular">
           {value}
         </div>
         {foot && (
