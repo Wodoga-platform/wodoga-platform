@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlertTriangle, RefreshCw, CheckCircle, ArrowUpCircle } from 'lucide-react';
+import { AlertTriangle, ArrowUpCircle, CheckCircle, Pill, RefreshCcw, RefreshCw } from 'lucide-react';
 import { Button, Badge, EmptyState, Alert, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { medicationService, patientService } from '@/services';
@@ -203,7 +203,7 @@ export default function ReconciliationPage() {
               </div>
             </div>
             {result.medications.length === 0 ? (
-              <EmptyState icon="💊" title="No active medications" />
+              <EmptyState icon={Pill} title="No active medications" />
             ) : (
               <table className="data-table">
                 <thead>
@@ -252,7 +252,7 @@ export default function ReconciliationPage() {
       {!result && !recoMut.isPending && (
         <div className="card">
           <EmptyState
-            icon="🔄"
+            icon={RefreshCcw}
             title="Select a patient to begin"
             description="Choose a patient above and click Run Reconciliation to check for drug interactions."
           />
