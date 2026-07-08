@@ -160,7 +160,7 @@ export default function MapPage() {
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
             <div style={{ pointerEvents: 'auto', maxWidth: 420 }}>
               <EmptyState
-                icon="🗺️"
+                icon={MapPin}
                 title="No mapped patients yet"
                 description="Patients appear here once their addresses are geocoded. If you've just added the Azure Maps key, click 'Geocode Existing Patients' above to map your current patients."
               />
