@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { UserPlus } from 'lucide-react';
+import { User, UserPlus } from 'lucide-react';
 import { Button, Badge, Avatar, EmptyState, PageLoader, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { staffService } from '@/services';
@@ -43,7 +43,7 @@ export default function StaffPage() {
 
       <div className="card">
         <div className="card-header"><div className="text-sm font-bold">All Staff Members</div><div className="text-xs text-ink-3">{staff.length} members</div></div>
-        {isLoading ? <PageLoader /> : staff.length === 0 ? <EmptyState icon="👤" title="No staff added" /> : (
+        {isLoading ? <PageLoader /> : staff.length === 0 ? <EmptyState icon={User} title="No staff added" /> : (
           <table className="data-table">
             <thead><tr><th>Name</th><th>Role</th><th>Email</th><th>License</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
             <tbody>
