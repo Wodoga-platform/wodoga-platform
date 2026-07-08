@@ -7,14 +7,27 @@ import {
   LayoutDashboard, Users, Home, ClipboardList, HeartPulse,
   Pill, RefreshCcw, Factory, GitMerge, CreditCard,
   CheckCircle, MessageSquare, FileText, Search, MapPin,
-  LogOut, Bell, ChevronDown, User, Shield, Lock,
+  LogOut, Bell, User,
 } from 'lucide-react';
 import { cn, ROLE_DISPLAY } from '@/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { Avatar, Badge, Spinner } from '@/components/ui';
 import { notificationService, patientService } from '@/services';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { Permission } from '@/types';
+
+// ── Brand mark: "The Care Thread" (onDark variant for the topbar) ──
+function WodogaMark({ size = 30 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true" className="flex-shrink-0">
+      <rect width="48" height="48" rx="12" fill="rgba(255,255,255,0.12)" />
+      <path
+        d="M10 15 L15.6 31.4 Q16.6 34.2 17.8 31.5 L22.9 20.1 Q24 17.8 25.1 20.1 L30.2 31.5 Q31.4 34.2 32.4 31.4 L38 15"
+        stroke="#FFFFFF" strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round" fill="none"
+      />
+    </svg>
+  );
+}
 
 // ── Nav Item Definition ───────────────────────────────────────
 interface NavItem {
@@ -111,10 +124,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <header className="h-[58px] bg-forest flex items-center px-0 sticky top-0 z-40 shadow-lg flex-shrink-0">
         {/* Logo */}
         <div className="w-[220px] min-w-[220px] flex items-center gap-2.5 px-5 border-r border-white/10 h-full">
-          <div className="w-[30px] h-[30px] bg-gradient-to-br from-forest-light to-forest-mid
-                          rounded-lg flex items-center justify-center text-[15px] shadow-md">
-            🌿
-          </div>
+          <WodogaMark size={30} />
           <span className="font-display text-[19px] font-bold text-white tracking-tight">Wodoga</span>
         </div>
 
@@ -264,13 +274,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                         key={item.href}
                         href={item.href}
                         className={cn(
-                          'flex items-center gap-2.5 px-4 py-2 text-sm font-medium',
-                          'border-l-[3px] transition-all duration-150',
+                          'relative flex items-center gap-2.5 pl-4 pr-3 py-2 mx-2 rounded-md text-sm font-medium',
+                          'transition-all duration-150',
                           active
-                            ? 'bg-forest-ghost text-forest border-l-forest font-bold'
-                            : 'text-ink-2 border-l-transparent hover:bg-surface-2 hover:text-ink',
+                            ? 'bg-forest-ghost text-forest font-semibold'
+                            : 'text-ink-2 hover:bg-surface-2 hover:text-ink',
                         )}
                       >
+                        {active && (
+                          <span aria-hidden="true" className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-forest" />
+                        )}
                         <span className={cn('flex-shrink-0', active ? 'text-forest' : 'text-ink-3')}>
                           {item.icon}
                         </span>
@@ -290,7 +303,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
           {/* Sidebar footer */}
           <div className="px-4 py-3 border-t border-surface-border">
-            <div className="text-[10px] text-ink-4 font-mono">Wodoga v2.0 · HIPAA Ready</div>
+            <div className="text-[10px] text-ink-4 font-mono">Wodoga · HIPAA-conscious by design</div>
           </div>
         </aside>
 
