@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { CheckCircle2, ClipboardList, Plus, Search } from 'lucide-react';
+import { CheckCircle2, ClipboardList, Clock, Plus, Search, XCircle } from 'lucide-react';
 import { Button, Badge, EmptyState, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { eligibilityService, patientService, staffService } from '@/services';
@@ -70,7 +70,7 @@ export default function EligibilityPage() {
   return (
     <>
       <div className="mb-6"><h1 className="page-title">Insurance Eligibility</h1><p className="page-subtitle">Verify patient coverage before visits to prevent denied claims</p></div>
-      <div className="grid grid-cols-2 gap-5 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-5">
         <div className="card">
           <div className="card-header"><div className="text-sm font-bold">Verify Eligibility</div></div>
           <div className="card-body space-y-3">
@@ -84,7 +84,7 @@ export default function EligibilityPage() {
             <div><label className="form-label">Service Date</label><input type="date" className="form-input" {...register('service_date')} /></div>
             <Gated permission="eligibility:check">
               <Button variant="primary" className="w-full justify-center" loading={checkMut.isPending}
-                onClick={handleSubmit(d => checkMut.mutate(d))}>🔍 Check Eligibility</Button>
+                onClick={handleSubmit(d => checkMut.mutate(d))}>Check Eligibility</Button>
             </Gated>
           </div>
         </div>
@@ -94,7 +94,7 @@ export default function EligibilityPage() {
             <div className={`card p-6 text-center border-2 ${
               result.result === 'eligible' ? 'border-forest-light bg-forest-ghost' :
               result.result === 'not_eligible' ? 'border-red bg-red-ghost' : 'border-amber bg-amber-ghost'}`}>
-              <div className="text-4xl mb-3">{result.result === 'eligible' ? '✅' : result.result === 'not_eligible' ? '❌' : '⏳'}</div>
+              <div className="flex justify-center mb-3">{result.result === 'eligible' ? <CheckCircle2 size={36} className="text-forest" /> : result.result === 'not_eligible' ? <XCircle size={36} className="text-red" /> : <Clock size={36} className="text-amber" />}</div>
               <div className="font-display text-2xl font-semibold mb-2">{resultVariant.label}</div>
               <div className="text-sm text-ink-2 space-y-1">
                 <div>Insurance: <strong>{result.insurance_provider}</strong></div>
@@ -186,7 +186,7 @@ export default function EligibilityPage() {
             <label className="form-label">Insurance Provider *</label>
             <input className="form-input" placeholder="Medicare, Blue Cross Blue Shield..." {...regContract('insurance_provider', { required: true })} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="form-label">Plan Name</label>
               <input className="form-input" placeholder="e.g. PPO Gold" {...regContract('plan_name')} />
@@ -203,7 +203,7 @@ export default function EligibilityPage() {
             <label className="form-label">Payer ID</label>
             <input className="form-input" placeholder="Electronic payer ID for claims" {...regContract('payer_id')} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="form-label">Contract Start</label>
               <input type="date" className="form-input" {...regContract('contract_start')} />
