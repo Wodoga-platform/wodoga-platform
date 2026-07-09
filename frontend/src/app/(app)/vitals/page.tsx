@@ -111,19 +111,19 @@ export default function VitalsPage() {
               {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
             </select></div>
           <div className="section-title">Cardiovascular</div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="form-label">BP Systolic</label><input type="number" className="form-input" placeholder="120" {...register('bp_systolic')} /></div>
             <div><label className="form-label">BP Diastolic</label><input type="number" className="form-input" placeholder="80" {...register('bp_diastolic')} /></div>
             <div><label className="form-label">Heart Rate</label><input type="number" className="form-input" placeholder="72" {...register('heart_rate')} /></div>
           </div>
           <div className="section-title">Respiratory</div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="form-label">O₂ Saturation (%)</label><input type="number" className="form-input" placeholder="98" min="50" max="100" {...register('oxygen_saturation')} /></div>
             <div><label className="form-label">Resp. Rate</label><input type="number" className="form-input" placeholder="16" {...register('respiratory_rate')} /></div>
             <div><label className="form-label">Temperature (°F)</label><input type="number" step="0.1" className="form-input" placeholder="98.6" {...register('temperature')} /></div>
           </div>
           <div className="section-title">Other Measurements</div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="form-label">Weight (lbs)</label><input type="number" step="0.1" className="form-input" {...register('weight_lbs')} /></div>
             <div><label className="form-label">Blood Glucose</label><input type="number" className="form-input" {...register('blood_glucose')} /></div>
             <div><label className="form-label">Pain Scale (0–10)</label><input type="number" min="0" max="10" className="form-input" {...register('pain_scale')} /></div>
