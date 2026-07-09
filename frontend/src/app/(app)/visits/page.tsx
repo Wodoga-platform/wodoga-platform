@@ -269,7 +269,7 @@ export default function VisitsPage() {
                 {/* Visit Details */}
                 <div>
                   <div className="section-title">Visit Information</div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <InfoField label="Date" value={fmtDate(selected.visit_date)} />
                     <InfoField label="Time" value={selected.visit_time ? fmtTime(selected.visit_time) : '—'} />
                     <InfoField label="Caregiver" value={selected.caregiver_name || 'Unassigned'} />
@@ -282,7 +282,7 @@ export default function VisitsPage() {
                 {(selected.checkin_at || selected.checkout_at) && (
                   <div>
                     <div className="section-title">GPS Tracking</div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {selected.checkin_at && (
                         <InfoField label="Check-In" value={new Date(selected.checkin_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
                       )}
@@ -421,7 +421,7 @@ export default function VisitsPage() {
               {caregivers?.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="form-label">Date *</label>
               <input type="date" className="form-input" {...rs('visit_date', { required: true })} />
@@ -491,7 +491,7 @@ export default function VisitsPage() {
               />
             </div>
           ))}
-          <div className="grid grid-cols-2 gap-3 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
               <label className="form-label">Duration (minutes)</label>
               <input type="number" className="form-input" defaultValue={60} min={5} {...rsoap('duration')} />
