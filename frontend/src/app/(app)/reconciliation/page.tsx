@@ -113,7 +113,7 @@ export default function ReconciliationPage() {
       {result && !recoMut.isPending && (
         <>
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-4 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-5">
             <div className="card p-4 text-center">
               <div className="text-2xl font-bold text-ink">{result.medications_reviewed}</div>
               <div className="text-xs text-ink-3 mt-1 font-medium">Medications Reviewed</div>
