@@ -313,7 +313,7 @@ export default function PatientsPage() {
                   <div className="space-y-4">
                     <div>
                       <div className="section-title">Demographics</div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <InfoField label="Gender"     value={selected.gender} />
                         <InfoField label="Blood Type" value={selected.blood_type} />
                         <InfoField label="Phone"      value={selected.phone} />
@@ -340,7 +340,7 @@ export default function PatientsPage() {
                     </div>
                     <div>
                       <div className="section-title">Insurance</div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <InfoField label="Provider" value={selected.insurance_primary?.provider} />
                         <InfoField label="Member ID" value={selected.insurance_primary?.member_id} />
                       </div>
@@ -376,7 +376,7 @@ export default function PatientsPage() {
                     ) : (
                       summary?.medications.map(m => (
                         <div key={m.id} className="flex gap-3 p-3 bg-bg rounded mb-2 border border-surface-border">
-                          <div className="w-9 h-9 bg-purple-pale rounded flex items-center justify-center text-lg flex-shrink-0">💊</div>
+                          <div className="w-9 h-9 bg-purple-pale rounded flex items-center justify-center flex-shrink-0"><Pill size={16} className="text-purple" /></div>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-bold">{m.drug_name} <span className="font-normal text-ink-3">{m.dosage}</span></div>
                             <div className="text-xs text-ink-3">{m.route} · {m.frequency}</div>
@@ -419,7 +419,7 @@ export default function PatientsPage() {
                 {/* Billing tab */}
                 {detailTab === 'billing' && (
                   <div>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                       <div className="text-center p-3 bg-bg rounded border border-surface-border">
                         <div className="text-xl font-bold text-forest font-display">
                           ${(summary?.billing.total_billed || 0).toFixed(0)}
@@ -464,7 +464,7 @@ export default function PatientsPage() {
       >
         <form className="space-y-0">
           <div className="section-title">Demographics</div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="form-label">First Name *</label>
               <input className="form-input" placeholder="Jane" {...register('first_name')} />
@@ -495,7 +495,7 @@ export default function PatientsPage() {
               <input type="email" className="form-input" placeholder="patient@email.com" {...register('email')} />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
             <div className="col-span-3">
               <label className="form-label">Address</label>
               <input className="form-input" placeholder="123 Main St" {...register('address_line1')} />
@@ -506,7 +506,7 @@ export default function PatientsPage() {
           </div>
 
           <div className="section-title mt-4">Medical</div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="form-label">Primary Diagnosis</label>
               <input className="form-input" placeholder="CHF, COPD..." {...register('primary_diagnosis')} />
@@ -529,7 +529,7 @@ export default function PatientsPage() {
           </div>
 
           <div className="section-title">Insurance</div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="form-label">Insurance Provider</label>
               <input className="form-input" placeholder="Medicare, Blue Cross..." {...register('insurance_provider')} />
