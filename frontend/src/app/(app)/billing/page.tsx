@@ -60,7 +60,7 @@ export default function BillingPage() {
         </Gated>
       </div>
 
-      <div className="grid grid-cols-3 gap-3.5 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mb-6">
         <StatCard label="Pending" value={summary?.pending_count || 0} icon={Clock} accent="amber" />
         <StatCard label="Approved" value={summary?.approved_count || 0} icon={CheckCircle2} accent="green" />
         <StatCard label="Denied" value={summary?.denied_count || 0} icon={XCircle} accent="red" />
@@ -119,7 +119,7 @@ export default function BillingPage() {
               <option value="">Select patient...</option>
               {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
             </select></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Service Type *</label><input className="form-input" placeholder="Home Health Visit" {...register('service_type', { required: true })} /></div>
             <div><label className="form-label">Amount ($) *</label><input type="number" step="0.01" className="form-input" {...register('amount_billed', { required: true })} /></div>
             <div><label className="form-label">Insurance Provider</label><input className="form-input" placeholder="Medicare..." {...register('insurance_provider')} /></div>
