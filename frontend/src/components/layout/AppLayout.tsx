@@ -7,12 +7,13 @@ import {
   LayoutDashboard, Users, Home, ClipboardList, HeartPulse,
   Pill, RefreshCcw, Factory, GitMerge, CreditCard,
   CheckCircle, MessageSquare, FileText, Search, MapPin,
-  LogOut, Bell, User,
+  LogOut, Bell, User, Sun, Moon, Menu,
 } from 'lucide-react';
 import { cn, ROLE_DISPLAY } from '@/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { Avatar, Badge, Spinner } from '@/components/ui';
 import { notificationService, patientService } from '@/services';
+import { useTheme } from '@/hooks/useTheme';
 import { useQuery } from '@tanstack/react-query';
 import type { Permission } from '@/types';
 
@@ -72,6 +73,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   const [notifOpen, setNotifOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -88,6 +90,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }, [isAuthenticated, router]);
 
   // Notifications
+  const { theme, toggle } = useTheme();
   const { data: notifications = [] } = useQuery({
     queryKey: ['notifications'],
     queryFn:  () => notificationService.list(),
@@ -122,15 +125,23 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex flex-col min-h-screen">
       {/* ── TOPBAR ── */}
       <header className="h-[58px] bg-forest flex items-center px-0 sticky top-0 z-40 shadow-lg flex-shrink-0">
+        {/* Hamburger — mobile only */}
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="Open navigation menu"
+          className="lg:hidden w-11 h-full flex items-center justify-center text-white/90 hover:bg-white/10"
+        >
+          <Menu size={20} />
+        </button>
         {/* Logo */}
-        <div className="w-[220px] min-w-[220px] flex items-center gap-2.5 px-5 border-r border-white/10 h-full">
+        <div className="w-auto lg:w-[220px] lg:min-w-[220px] flex items-center gap-2.5 px-3 lg:px-5 lg:border-r border-white/10 h-full">
           <WodogaMark size={30} />
-          <span className="font-display text-[19px] font-bold text-white tracking-tight">Wodoga</span>
+          <span className="font-display text-[19px] font-bold text-white tracking-tight hidden sm:inline">Wodoga</span>
         </div>
 
         {/* Search */}
-        <div className="flex-1 px-5">
-          <div className="relative w-[360px]">
+        <div className="flex-1 px-3 lg:px-5 hidden sm:block">
+          <div className="relative w-full max-w-[360px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
             <input
               type="text"
@@ -178,6 +189,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
         {/* Right actions */}
         <div className="flex items-center gap-2 pr-5">
+          {/* Theme toggle */}
+          <button
+            onClick={toggle}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="w-9 h-9 flex items-center justify-center rounded bg-white/8 border border-white/12
+                       text-white/80 hover:bg-white/15 transition-colors"
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           {/* Notifications */}
           <div className="relative">
             <button
@@ -256,10 +276,24 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Mobile backdrop */}
+        {mobileNavOpen && (
+          <div
+            className="lg:hidden fixed inset-0 top-[58px] bg-black/40 z-30"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         {/* ── SIDEBAR ── */}
-        <aside className="w-[220px] min-w-[220px] bg-surface border-r border-surface-border
-                          flex flex-col overflow-y-auto sticky top-[58px] h-[calc(100vh-58px)]">
-          <nav className="py-3 flex-1">
+        <aside className={cn(
+          'w-[240px] min-w-[240px] bg-surface border-r border-surface-border',
+          'flex flex-col overflow-y-auto',
+          // Desktop: static in flow. Mobile: fixed drawer that slides in.
+          'lg:sticky lg:top-[58px] lg:h-[calc(100vh-58px)] lg:translate-x-0',
+          'fixed top-[58px] left-0 h-[calc(100vh-58px)] z-40 transition-transform duration-200',
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+        )}>
+          <nav className="py-3 flex-1" onClick={() => setMobileNavOpen(false)}>
             {sections.map(section => {
               const items = visibleItems.filter(i => i.section === section);
               return (
