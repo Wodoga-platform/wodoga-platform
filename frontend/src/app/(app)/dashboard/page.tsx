@@ -177,7 +177,7 @@ export default function DashboardPage() {
       )}
 
       {/* ── Stats ── */}
-      <div className="grid grid-cols-4 gap-3.5 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 mb-6">
         <StatCard
           label="Total Patients"
           value={totalPatients}
@@ -210,7 +210,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Main grid ── */}
-      <div className="grid grid-cols-2 gap-5 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-5">
 
         {/* Recent visits — rolling 7-day window */}
         <div className="card">
