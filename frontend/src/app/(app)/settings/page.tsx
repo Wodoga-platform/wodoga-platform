@@ -173,7 +173,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
         {/* Change Password */}
         <div className="card">
           <div className="card-header">
@@ -308,7 +308,7 @@ export default function SettingsPage() {
                     <p className="text-[11px] text-amber-700 mb-2">
                       Keep these safe. Each lets you log in once if you lose your phone.
                     </p>
-                    <div className="grid grid-cols-2 gap-1 font-mono text-xs text-amber-900">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono text-xs text-amber-900">
                       {backupCodes.map((c) => <div key={c}>{c}</div>)}
                     </div>
                   </div>
