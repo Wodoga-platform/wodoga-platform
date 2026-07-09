@@ -4,7 +4,7 @@
  */
 
 import type { ReactNode, ButtonHTMLAttributes } from 'react';
-import { Inbox, type LucideIcon } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Inbox, Info, type LucideIcon } from 'lucide-react';
 import { cn, type BadgeVariant, initials, avatarColor } from '@/utils';
 
 // ════════════════════════════════════════════════════════════
@@ -270,8 +270,8 @@ const ALERT_STYLES: Record<AlertType, string> = {
   info:    'bg-blue-ghost   border-blue-pale   text-blue',
 };
 
-const ALERT_ICONS: Record<AlertType, string> = {
-  success: '✅', warning: '⚠️', error: '❌', info: 'ℹ️',
+const ALERT_ICONS: Record<AlertType, LucideIcon> = {
+  success: CheckCircle2, warning: AlertTriangle, error: AlertCircle, info: Info,
 };
 
 export function Alert({
@@ -283,9 +283,11 @@ export function Alert({
   children: ReactNode;
   className?: string;
 }) {
+  const Icon = ALERT_ICONS[type];
   return (
-    <div className={cn('flex gap-2.5 p-3 rounded border text-sm mb-3', ALERT_STYLES[type], className)}>
-      <span>{ALERT_ICONS[type]}</span>
+    <div role={type === 'error' ? 'alert' : 'status'}
+         className={cn('flex gap-2.5 p-3 rounded border text-sm mb-3 items-start', ALERT_STYLES[type], className)}>
+      <Icon size={16} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
       <div>{children}</div>
     </div>
   );
