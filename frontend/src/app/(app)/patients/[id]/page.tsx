@@ -439,7 +439,7 @@ export default function PatientChartPage() {
                 </div>
               </div>
               {v.soap_subjective && (
-                <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                   {[
                     { l: 'Subjective', v: v.soap_subjective, c: '#1d4ed8' },
                     { l: 'Objective',  v: v.soap_objective,  c: '#7c3aed' },
@@ -754,7 +754,7 @@ export default function PatientChartPage() {
         }
       >
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="form-label">BP Systolic</label><input type="number" className="form-input" placeholder="120" {...rv('bp_systolic')} /></div>
             <div><label className="form-label">BP Diastolic</label><input type="number" className="form-input" placeholder="80" {...rv('bp_diastolic')} /></div>
             <div><label className="form-label">Heart Rate</label><input type="number" className="form-input" placeholder="72" {...rv('heart_rate')} /></div>
@@ -790,7 +790,7 @@ export default function PatientChartPage() {
               {caregivers?.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Date *</label><input type="date" className="form-input" {...rvs('visit_date', { required: true })} /></div>
             <div><label className="form-label">Time</label><input type="time" className="form-input" {...rvs('visit_time')} /></div>
           </div>
@@ -821,7 +821,7 @@ export default function PatientChartPage() {
           </ModalFooter>
         }
       >
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="form-label">First Name *</label>
             <input className="form-input" {...editForm.register('first_name')} />
@@ -868,7 +868,7 @@ export default function PatientChartPage() {
             <input className="form-input" placeholder="123 Main St" {...editForm.register('address_line1')} />
           </div>
           <div><label className="form-label">City</label><input className="form-input" {...editForm.register('city')} /></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">State</label><input className="form-input" placeholder="TX" {...editForm.register('state')} /></div>
             <div><label className="form-label">ZIP</label><input className="form-input" {...editForm.register('zip')} /></div>
           </div>
