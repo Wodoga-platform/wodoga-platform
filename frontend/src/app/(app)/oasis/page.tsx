@@ -98,7 +98,7 @@ export default function OASISPage() {
               <option value="">Select patient...</option>
               {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
             </select></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Assessment Type *</label>
               <select className="form-select" {...register('assessment_type', { required: true })}>
                 {OASIS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -106,7 +106,7 @@ export default function OASISPage() {
             <div><label className="form-label">Assessment Date *</label><input type="date" className="form-input" {...register('assessment_date', { required: true })} /></div>
           </div>
           <div className="section-title mt-2">Key OASIS Items</div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="form-label">M1032 — Hosp. Risk</label>
               <select className="form-select" {...register('m1032_hospitalization_risk')}>
                 <option value="">Select</option>
