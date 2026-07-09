@@ -46,7 +46,7 @@ export default function PortalDashboard() {
       {/* Portal header */}
       <header className="bg-forest px-6 py-4 flex items-center justify-between shadow-lg">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-forest-light rounded-lg flex items-center justify-center text-base">🌿</div>
+          <svg width="30" height="30" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect width="48" height="48" rx="12" fill="rgba(255,255,255,0.15)"/><path d="M10 15 L15.6 31.4 Q16.6 34.2 17.8 31.5 L22.9 20.1 Q24 17.8 25.1 20.1 L30.2 31.5 Q31.4 34.2 32.4 31.4 L38 15" stroke="#FFFFFF" strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
           <div>
             <div className="font-display text-lg font-bold text-white">Wodoga</div>
             <div className="text-[10px] text-white/50 uppercase tracking-wider">Patient Portal</div>
@@ -67,12 +67,12 @@ export default function PortalDashboard() {
             {profile?.primary_diagnosis && <span>Diagnosis: {profile.primary_diagnosis}</span>}
           </div>
           <div className="flex gap-4 mt-4 text-sm text-white/80">
-            {profile?.caregiver_name && <span>👤 Caregiver: <strong className="text-white">{profile.caregiver_name}</strong></span>}
-            {profile?.provider_name  && <span>🩺 Provider: <strong className="text-white">{profile.provider_name}</strong></span>}
+            {profile?.caregiver_name && <span>Caregiver: <strong className="text-white">{profile.caregiver_name}</strong></span>}
+            {profile?.provider_name  && <span>Provider: <strong className="text-white">{profile.provider_name}</strong></span>}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           {/* Upcoming visits */}
           <div className="card">
             <div className="card-header"><div className="text-sm font-bold">Upcoming Visits</div></div>
@@ -102,7 +102,7 @@ export default function PortalDashboard() {
               <div className="divide-y divide-surface-borderLt">
                 {meds.map((m: any) => (
                   <div key={m.drug_name} className="px-5 py-3 flex items-start gap-2.5">
-                    <div className="w-8 h-8 bg-purple-pale rounded flex items-center justify-center text-base flex-shrink-0">💊</div>
+                    <div className="w-8 h-8 bg-purple-pale rounded flex items-center justify-center flex-shrink-0"><Pill size={14} className="text-purple" /></div>
                     <div>
                       <div className="text-sm font-bold">{m.drug_name} <span className="font-normal text-ink-3">{m.dosage}</span></div>
                       <div className="text-xs text-ink-3">{m.frequency}</div>
@@ -118,7 +118,7 @@ export default function PortalDashboard() {
           {latestVitals && (
             <div className="card">
               <div className="card-header"><div className="text-sm font-bold">Latest Vitals</div><div className="text-xs text-ink-3">{fmtDate(latestVitals.recorded_at)}</div></div>
-              <div className="p-4 grid grid-cols-3 gap-3">
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {latestVitals.bp_systolic && (
                   <div className="text-center p-3 bg-bg rounded border border-surface-border">
                     <div className="text-lg font-mono font-bold">{latestVitals.bp_systolic}/{latestVitals.bp_diastolic}</div>
@@ -169,7 +169,7 @@ export default function PortalDashboard() {
           {carePlan && (
             <div className="card col-span-2">
               <div className="card-header"><div className="text-sm font-bold">My Care Plan</div><Badge variant="green">Active</Badge></div>
-              <div className="p-5 grid grid-cols-3 gap-4">
+              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div><div className="form-label">Diagnosis</div><div className="text-sm font-medium">{carePlan.primary_diagnosis}</div></div>
                 <div><div className="form-label">Visit Frequency</div><div className="text-sm font-medium">{carePlan.visit_frequency}</div></div>
                 <div><div className="form-label">Physician</div><div className="text-sm font-medium">{carePlan.ordering_physician}</div></div>
@@ -195,7 +195,7 @@ export default function PortalDashboard() {
           <ModalFooter>
             <Button variant="secondary" onClick={() => { setMsgOpen(false); reset(); }}>Cancel</Button>
             <Button variant="primary" loading={sendMsg.isPending}
-              onClick={handleSubmit((d: any) => sendMsg.mutate(d))}>Send Message 🔒</Button>
+              onClick={handleSubmit((d: any) => sendMsg.mutate(d))}>Send Message</Button>
           </ModalFooter>
         }>
         <div className="space-y-3">
@@ -208,7 +208,7 @@ export default function PortalDashboard() {
             <textarea className="form-textarea min-h-[120px]" placeholder="Type your message here..." {...register('body', { required: true })} />
           </div>
           <div className="text-xs text-ink-3 bg-bg rounded p-3 border border-surface-borderLt">
-            🔒 This message is private and secure. For medical emergencies, call 911 — do not use this message system.
+            This message is private and secure. For medical emergencies, call 911 — do not use this message system.
           </div>
         </div>
       </Modal>
