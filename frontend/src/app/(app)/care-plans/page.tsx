@@ -102,7 +102,7 @@ export default function CarePlansPage() {
               <option value="">Select patient...</option>
               {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
             </select></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Primary Diagnosis *</label><input className="form-input" {...register('primary_diagnosis', { required: true })} /></div>
             <div><label className="form-label">Ordering Physician *</label><input className="form-input" {...register('ordering_physician', { required: true })} /></div>
             <div><label className="form-label">Start Date *</label><input type="date" className="form-input" {...register('start_date', { required: true })} /></div>
@@ -123,7 +123,7 @@ export default function CarePlansPage() {
           footer={<ModalFooter><Button variant="secondary" onClick={() => setEditPlan(null)}>Cancel</Button>
             <Button variant="primary" loading={updateMut.isPending} onClick={he(d => updateMut.mutate({ id: editPlan.id, body: d }))}>Save Changes</Button></ModalFooter>}>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className="form-label">Primary Diagnosis</label><input className="form-input" {...re('primary_diagnosis')} /></div>
               <div><label className="form-label">Ordering Physician</label><input className="form-input" {...re('ordering_physician')} /></div>
               <div><label className="form-label">Start Date</label><input type="date" className="form-input" {...re('start_date')} /></div>
