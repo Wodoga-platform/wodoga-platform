@@ -124,7 +124,7 @@ export default function PharmOrdersPage() {
               <option value="">Select patient...</option>
               {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
             </select></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Drug Name *</label><input className="form-input" {...register('drug_name', { required: true })} /></div>
             <div><label className="form-label">Quantity</label><input className="form-input" placeholder="30 tablets" {...register('quantity')} /></div>
             <div><label className="form-label">Pharmacy Name</label><input className="form-input" {...register('pharmacy_name')} /></div>
@@ -144,7 +144,7 @@ export default function PharmOrdersPage() {
           footer={<ModalFooter><Button variant="secondary" onClick={() => setEditOrder(null)}>Cancel</Button>
             <Button variant="primary" loading={updateMut.isPending} onClick={he(d => updateMut.mutate({ id: editOrder.id, body: d }))}>Save Changes</Button></ModalFooter>}>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className="form-label">Drug Name</label><input className="form-input" {...re('drug_name')} /></div>
               <div><label className="form-label">Quantity</label><input className="form-input" {...re('quantity')} /></div>
               <div><label className="form-label">Pharmacy Name</label><input className="form-input" {...re('pharmacy_name')} /></div>
