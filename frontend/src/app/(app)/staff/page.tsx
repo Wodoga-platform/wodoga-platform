@@ -82,7 +82,7 @@ export default function StaffPage() {
         footer={<ModalFooter><Button variant="secondary" onClick={() => setInviteOpen(false)}>Cancel</Button>
           <Button variant="primary" loading={inviteMut.isPending} onClick={handleSubmit(d => inviteMut.mutate(d))}>Send Invitation</Button></ModalFooter>}>
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">First Name *</label><input className="form-input" {...register('first_name', { required: true })} /></div>
             <div><label className="form-label">Last Name *</label><input className="form-input" {...register('last_name', { required: true })} /></div>
           </div>
@@ -93,7 +93,7 @@ export default function StaffPage() {
               {(['admin','provider','pharmacy_staff','biller','viewer','caregiver'] as UserRole[]).map(r =>
                 <option key={r} value={r}>{ROLE_DISPLAY[r]}</option>)}
             </select></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Phone</label><input className="form-input" {...register('phone')} /></div>
             <div><label className="form-label">License #</label><input className="form-input" {...register('license_number')} /></div>
           </div>
