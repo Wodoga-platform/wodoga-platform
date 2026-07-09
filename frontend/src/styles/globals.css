@@ -5,6 +5,50 @@
 @tailwind utilities;
 
 /* ────────────────────────────────────────────────────────────
+   THEME TOKENS — light (:root) and dark (.dark)
+   Every Tailwind color resolves to these RGB triples, so toggling
+   the `.dark` class on <html> reskins the entire app. Values are
+   space-separated RGB channels (Tailwind adds the alpha).
+   ──────────────────────────────────────────────────────────── */
+:root {
+  /* Primary — evergreen */
+  --c-forest: 13 92 70;      --c-forest-mid: 18 128 95;   --c-forest-light: 43 163 126;
+  --c-forest-pale: 214 242 231; --c-forest-ghost: 242 251 247;
+  /* Neutrals — cool precision */
+  --c-ink: 20 24 22;   --c-ink-2: 63 70 67;   --c-ink-3: 121 130 125;  --c-ink-4: 174 182 177;
+  --c-surface: 255 255 255;  --c-surface-2: 243 245 244;
+  --c-border: 226 230 228;   --c-border-lt: 236 239 237;  --c-bg: 248 250 249;
+  /* Status */
+  --c-blue: 30 58 138;   --c-blue-mid: 37 99 235;   --c-blue-pale: 219 234 254;  --c-blue-ghost: 239 246 255;
+  --c-amber: 146 64 14;  --c-amber-mid: 217 119 6;  --c-amber-pale: 254 243 199; --c-amber-ghost: 255 251 235;
+  --c-red: 153 27 27;    --c-red-mid: 220 38 38;    --c-red-pale: 254 226 226;   --c-red-ghost: 254 242 242;
+  --c-purple: 76 29 149; --c-purple-mid: 124 58 237;--c-purple-pale: 237 233 254;--c-purple-ghost: 245 243 255;
+  --c-teal: 19 78 74;    --c-teal-mid: 13 148 136;  --c-teal-pale: 204 251 241;  --c-teal-ghost: 240 253 250;
+}
+
+.dark {
+  /* Primary — brightened so evergreen stays legible on dark surfaces */
+  --c-forest: 52 191 148;    --c-forest-mid: 43 163 126;  --c-forest-light: 74 212 181;
+  --c-forest-pale: 20 51 41;    --c-forest-ghost: 16 32 27;
+  /* Neutrals — inverted ramp; ink becomes light-on-dark */
+  --c-ink: 232 237 234;  --c-ink-2: 185 194 189;  --c-ink-3: 138 148 143;  --c-ink-4: 95 105 100;
+  --c-surface: 24 30 27;     --c-surface-2: 32 40 36;
+  --c-border: 46 56 51;      --c-border-lt: 38 47 42;     --c-bg: 15 20 18;
+  /* Status — darker fills, brighter text; alert MEANING preserved.
+     ghost = subtle tinted surface, pale = border/fill, DEFAULT = text. */
+  --c-blue: 147 197 253;  --c-blue-mid: 96 165 250;  --c-blue-pale: 30 58 138;   --c-blue-ghost: 23 37 66;
+  --c-amber: 252 211 77;  --c-amber-mid: 251 191 36; --c-amber-pale: 120 53 15;  --c-amber-ghost: 55 33 10;
+  --c-red: 252 165 165;   --c-red-mid: 248 113 113;  --c-red-pale: 127 29 29;    --c-red-ghost: 60 20 20;
+  --c-purple: 196 181 253;--c-purple-mid: 167 139 250;--c-purple-pale: 76 29 149;--c-purple-ghost: 40 25 66;
+  --c-teal: 94 234 212;   --c-teal-mid: 45 212 191;  --c-teal-pale: 19 78 74;    --c-teal-ghost: 13 45 42;
+}
+
+/* Smooth the theme transition on the elements that carry color */
+body, .card, .form-input, .data-table th, .data-table td {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* ────────────────────────────────────────────────────────────
    Wodoga Design System v2 — "The Care Thread"
    Every class name from v1 is preserved; values evolved.
    ──────────────────────────────────────────────────────────── */
@@ -54,7 +98,7 @@
 @layer components {
 
   /* Page container */
-  .page-container { @apply p-7 max-w-full; }
+  .page-container { @apply p-4 sm:p-6 lg:p-7 max-w-full; }
 
   /* Card — flatter border-led elevation; shadow only on interaction */
   .card {
