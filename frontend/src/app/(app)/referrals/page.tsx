@@ -102,7 +102,7 @@ export default function ReferralsPage() {
         footer={<ModalFooter><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button>
           <Button variant="primary" loading={createMut.isPending} onClick={handleSubmit(d => createMut.mutate(d))}>Create Referral</Button></ModalFooter>}>
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">First Name *</label><input className="form-input" {...register('first_name', { required: true })} /></div>
             <div><label className="form-label">Last Name *</label><input className="form-input" {...register('last_name', { required: true })} /></div>
             <div><label className="form-label">Date of Birth</label><input type="date" className="form-input" {...register('date_of_birth')} /></div>
