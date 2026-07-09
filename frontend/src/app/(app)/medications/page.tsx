@@ -115,7 +115,7 @@ export default function MedicationsPage() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         <div className="col-span-2 card">
           <div className="card-header"><div className="text-sm font-bold">Active Medications</div></div>
           {isLoading ? <PageLoader /> : meds.length === 0 ? (
@@ -211,7 +211,7 @@ export default function MedicationsPage() {
               <option value="">Select patient...</option>
               {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
             </select></div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="form-label">Drug Name *</label><input className="form-input" placeholder="Lisinopril" {...register('drug_name', { required: true })} /></div>
             <div><label className="form-label">Dosage *</label><input className="form-input" placeholder="10mg" {...register('dosage', { required: true })} /></div>
             <div><label className="form-label">Route</label>
