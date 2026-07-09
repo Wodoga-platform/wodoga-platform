@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, Shield } from 'lucide-react';
+import { Eye, EyeOff, Shield, ShieldCheck } from 'lucide-react';
 import { Button, Alert } from '@/components/ui';
 import { useAuthStore } from '@/store/auth.store';
 import { authService } from '@/services';
@@ -89,7 +89,7 @@ export default function PortalLoginPage() {
       style={{ background: 'radial-gradient(ellipse 80% 60% at 10% 10%, rgba(64,145,108,0.18) 0%, transparent 60%), #1B4332' }}>
       <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden">
         <div className="p-8 pb-6 bg-forest text-center">
-          <div className="w-14 h-14 bg-forest-light rounded-xl flex items-center justify-center text-2xl mx-auto mb-3">🌿</div>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-3"><svg width="40" height="40" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect width="48" height="48" rx="12" fill="#0D5C46"/><path d="M10 15 L15.6 31.4 Q16.6 34.2 17.8 31.5 L22.9 20.1 Q24 17.8 25.1 20.1 L30.2 31.5 Q31.4 34.2 32.4 31.4 L38 15" stroke="#FFFFFF" strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg></div>
           <div className="font-display text-2xl font-bold text-white">Wodoga</div>
           <div className="text-xs text-white/50 uppercase tracking-widest mt-1">Patient Portal</div>
         </div>
@@ -123,7 +123,7 @@ export default function PortalLoginPage() {
           )}
           {step === 'mfa' && (
             <>
-              <div className="text-3xl mb-4 text-center">🔐</div>
+              <div className="flex justify-center mb-4"><ShieldCheck size={28} className="text-forest" aria-hidden="true" /></div>
               <h1 className="font-display text-xl font-semibold text-ink mb-1 text-center">Verify your identity</h1>
               <p className="text-sm text-ink-3 mb-6 text-center">Enter the 6-digit code from your authenticator app</p>
               {error && <Alert type="error" className="mb-4">{error}</Alert>}
