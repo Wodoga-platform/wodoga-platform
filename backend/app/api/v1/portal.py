@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import TokenPayload
+from app.core.phi_crypto import dec_scalar, decrypt_patient_row
 from app.api.v1.clinical_schemas import PortalMessageSendRequest
 from app.core.limiter import limiter
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
@@ -81,7 +82,12 @@ async def portal_my_profile(
         """),
         {"id": str(patient_id)},
     )
-    profile = result.mappings().first()
+    # Whole-row decrypt is safe here: every column in the SELECT above is
+    # either a patients column or a CONCAT alias (caregiver_name,
+    # caregiver_phone, provider_name). `caregiver_phone` comes from the users
+    # table and is NOT encrypted — it is left alone because it is not in the
+    # patient encrypted-column set.
+    profile = decrypt_patient_row(result.mappings().first())
 
     await audit.log(
         "PORTAL_PROFILE_VIEWED",
@@ -90,7 +96,7 @@ async def portal_my_profile(
         resource_type="patient",
         resource_id=patient_id,
     )
-    return {"data": dict(profile)}
+    return {"data": profile}
 
 
 # ── My Visits ──────────────────────────────────────────────────
@@ -405,6 +411,13 @@ async def invite_patient_to_portal(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "not_found", "message": "Patient not found."},
         )
+    patient = dict(patient)
+    # patients.email is encrypted. Decrypt it here, because it is about to be
+    # written into users.email — which is the portal LOGIN IDENTIFIER and must
+    # stay plaintext (it is CITEXT, uniquely indexed, and matched with
+    # `WHERE u.email = :email` at sign-in). Encrypting users.email would break
+    # authentication outright.
+    patient["email"] = dec_scalar(patient["email"])
     if not patient["email"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
