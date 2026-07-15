@@ -19,6 +19,13 @@ from datetime import datetime, date
 
 from app.core.audit import AuditAction, AuditLogger
 from app.core.permissions import Permission, TokenPayload, require_permissions, require_any_permission
+from app.core.phi_crypto import (
+    dec_scalar,
+    enc_float,
+    encrypt_patient_fields,
+    decrypt_patient_row,
+    decrypt_patient_rows,
+)
 from app.dependencies import (
     get_audit_logger,
     get_client_ip,
@@ -164,7 +171,13 @@ async def list_patients(
     rows = result.mappings().all()
 
     total = rows[0]["total_count"] if rows else 0
-    patients = [dict(row) for row in rows]
+
+    # Decrypt PHI (this SELECT pulls phone, email, insurance_primary).
+    # NOTE: `search` above still only matches first_name / last_name /
+    # primary_diagnosis / mrn — the columns we deliberately left in
+    # plaintext. Searching by phone or email is not possible and never was;
+    # encrypted columns cannot be matched with ILIKE.
+    patients = decrypt_patient_rows(rows)
 
     # Strip total_count from individual patient records
     for p in patients:
@@ -243,7 +256,12 @@ async def get_patient(
         resource_id=patient_id,
     )
 
-    patient_data = dict(patient)
+    # Decrypt PHI first, THEN apply the biller strip below. Order matters:
+    # the strip removes keys, and decrypt_patient_row only touches keys that
+    # are present — so decrypting after the strip would still be correct, but
+    # decrypting first keeps a single, predictable shape for the row and
+    # means any future consumer of patient_data gets real values.
+    patient_data = decrypt_patient_row(patient)
 
     # ── Role-based field filtering (HIPAA minimum-necessary) ─────────
     # Billers need patient identifiers, demographics, insurance, and
@@ -276,7 +294,41 @@ async def create_patient(
     audit: AuditLogger = Depends(get_audit_logger),
 ):
     """Creates a new patient record for the current organization."""
-    import json
+    # ── PHI encryption ───────────────────────────────────────────────
+    # Every parameter below is bound under its REAL COLUMN NAME, not an
+    # abbreviation. That is deliberate: encrypt_patient_fields() keys off
+    # column names, so if the SQL and the param dict ever drift apart, the
+    # encryption would silently skip a field and write plaintext PHI. Using
+    # the column name as the single identifier in both places makes that
+    # class of bug impossible.
+    params = {
+        "organization_id":     str(current_user.organization_id),
+        "first_name":          body.first_name,
+        "last_name":           body.last_name,
+        "date_of_birth":       body.date_of_birth,
+        "gender":              body.gender,
+        "city":                body.city,
+        "state":               body.state,
+        "zip":                 body.zip,
+        "blood_type":          body.blood_type,
+        "primary_diagnosis":   body.primary_diagnosis,
+        "fall_risk":           body.fall_risk,
+        "assigned_caregiver":  str(body.assigned_caregiver) if body.assigned_caregiver else None,
+        "assigned_provider":   str(body.assigned_provider) if body.assigned_provider else None,
+        # ── everything below this line gets encrypted ────────────────
+        "phone":               body.phone,
+        "email":               body.email,
+        "address_line1":       body.address_line1,
+        "address_line2":       body.address_line2,
+        "medical_history":     body.medical_history,
+        "notes":               body.notes,
+        "secondary_diagnoses": body.secondary_diagnoses or [],
+        "allergies":           body.allergies or [],
+        "emergency_contact":   body.emergency_contact,
+        "insurance_primary":   body.insurance_primary,
+        "insurance_secondary": body.insurance_secondary,
+    }
+    params = encrypt_patient_fields(params)
 
     result = await db.execute(
         text("""
@@ -288,52 +340,31 @@ async def create_patient(
                 emergency_contact, insurance_primary, insurance_secondary,
                 assigned_caregiver, assigned_provider, fall_risk, notes
             ) VALUES (
-                :org_id, :first_name, :last_name, :dob,
-                :gender, :phone, :email, :addr1, :addr2,
-                :city, :state, :zip, :blood, :dx,
-                :secondary_dx, :allergies, :history,
-                :emergency, :insurance_primary, :insurance_secondary,
-                :caregiver, :provider, :fall_risk, :notes
+                :organization_id, :first_name, :last_name, :date_of_birth,
+                :gender, :phone, :email, :address_line1, :address_line2,
+                :city, :state, :zip, :blood_type, :primary_diagnosis,
+                :secondary_diagnoses, :allergies, :medical_history,
+                :emergency_contact, :insurance_primary, :insurance_secondary,
+                :assigned_caregiver, :assigned_provider, :fall_risk, :notes
             )
             RETURNING id, first_name, last_name, created_at
         """),
-        {
-            "org_id":            str(current_user.organization_id),
-            "first_name":        body.first_name,
-            "last_name":         body.last_name,
-            "dob":               body.date_of_birth,
-            "gender":            body.gender,
-            "phone":             body.phone,
-            "email":             body.email,
-            "addr1":             body.address_line1,
-            "addr2":             body.address_line2,
-            "city":              body.city,
-            "state":             body.state,
-            "zip":               body.zip,
-            "blood":             body.blood_type,
-            "dx":                body.primary_diagnosis,
-            "secondary_dx":      body.secondary_diagnoses or [],
-            "allergies":         body.allergies or [],
-            "history":           body.medical_history,
-            "emergency":         json.dumps(body.emergency_contact) if body.emergency_contact else None,
-            "insurance_primary": json.dumps(body.insurance_primary) if body.insurance_primary else None,
-            "insurance_secondary": json.dumps(body.insurance_secondary) if body.insurance_secondary else None,
-            "caregiver":         str(body.assigned_caregiver) if body.assigned_caregiver else None,
-            "provider":          str(body.assigned_provider) if body.assigned_provider else None,
-            "fall_risk":         body.fall_risk,
-            "notes":             body.notes,
-        },
+        params,
     )
     new_patient = result.mappings().first()
 
-    # Geocode the address once and cache coordinates (best-effort)
+    # Geocode the address once and cache coordinates (best-effort).
+    # We geocode from `body` — the PLAINTEXT request payload — not from the
+    # params dict, which is now ciphertext.
     from app.core.geocoding import build_address_string, geocode_address
     addr = build_address_string(body.address_line1, body.city, body.state, body.zip)
     coords = await geocode_address(addr)
     if coords:
         await db.execute(
             text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-            {"lat": coords[0], "lon": coords[1], "id": str(new_patient["id"])},
+            # Coordinates are PHI — they pin the patient's home. Encrypt.
+            {"lat": enc_float(coords[0]), "lon": enc_float(coords[1]),
+             "id": str(new_patient["id"])},
         )
 
     await audit.log(
@@ -365,25 +396,37 @@ async def update_patient(
     Only provided fields are updated — others remain unchanged.
     Both before and after states are captured in the audit log.
     """
-    import json
-
-    # Fetch current state for audit log
+    # Fetch current state for the audit log AND for the geocode fallback
+    # below. This is a SELECT *, so every PHI column comes back as
+    # ciphertext — decrypt it once, here, and use the decrypted dict
+    # everywhere downstream.
     result = await db.execute(
         text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
         {"id": str(patient_id)},
     )
-    existing = result.mappings().first()
-    if not existing:
+    existing_row = result.mappings().first()
+    if not existing_row:
         raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Patient not found."})
+    existing = decrypt_patient_row(existing_row)
 
     # Build dynamic UPDATE
     updates = body.model_dump(exclude_none=True)
     if not updates:
-        return {"data": dict(existing), "message": "No changes provided."}
+        return {"data": existing, "message": "No changes provided."}
 
     set_clauses = []
     params = {"id": str(patient_id)}
 
+    # ALLOWLIST — every updatable column. Values are checked against this
+    # before being interpolated into the SET clause, which is what keeps the
+    # dynamic SQL safe.
+    #
+    # NOTE — BUG FIX: emergency_contact, insurance_primary and
+    # insurance_secondary were previously MISSING from this map. Because the
+    # loop below only acts on fields found in the map, a PATCH containing any
+    # of those three silently did nothing — the request returned 200 and the
+    # data was never written. The `json_fields` set that used to sit below
+    # this map was therefore dead code. They are added here.
     field_map = {
         "first_name": "first_name", "last_name": "last_name",
         "date_of_birth": "date_of_birth", "gender": "gender",
@@ -394,25 +437,26 @@ async def update_patient(
         "secondary_diagnoses": "secondary_diagnoses", "allergies": "allergies",
         "medical_history": "medical_history", "fall_risk": "fall_risk",
         "status": "status", "notes": "notes",
+        "emergency_contact": "emergency_contact",
+        "insurance_primary": "insurance_primary",
+        "insurance_secondary": "insurance_secondary",
         "assigned_caregiver": "assigned_caregiver",
         "assigned_provider": "assigned_provider",
         "assigned_pharmacy_staff": "assigned_pharmacy_staff",
     }
 
-    json_fields = {"emergency_contact", "insurance_primary", "insurance_secondary"}
-
     for field, value in updates.items():
         if field in field_map:
             set_clauses.append(f"{field_map[field]} = :{field}")
-            if field in json_fields and isinstance(value, dict):
-                params[field] = json.dumps(value)
-            elif isinstance(value, UUID):
-                params[field] = str(value)
-            else:
-                params[field] = value
+            params[field] = str(value) if isinstance(value, UUID) else value
 
     if not set_clauses:
-        return {"data": dict(existing), "message": "No valid fields to update."}
+        return {"data": existing, "message": "No valid fields to update."}
+
+    # Encrypt whichever PHI columns this PATCH actually touched. Fields not
+    # present in `params` are left alone, so partial updates stay partial.
+    # No json.dumps() is needed — enc_json() serialises dicts itself.
+    params = encrypt_patient_fields(params)
 
     await db.execute(
         text(f"UPDATE patients SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
@@ -423,6 +467,10 @@ async def update_patient(
     address_fields = {"address_line1", "city", "state", "zip"}
     if address_fields & set(updates.keys()):
         from app.core.geocoding import build_address_string, geocode_address
+        # `updates` is the plaintext request body and `existing` is the
+        # DECRYPTED row, so the address string built here is real text. If
+        # `existing` were used raw, a PATCH that changed only `city` would
+        # feed the geocoder a base64 blob for address_line1.
         addr = build_address_string(
             updates.get("address_line1", existing["address_line1"]),
             updates.get("city", existing["city"]),
@@ -433,7 +481,8 @@ async def update_patient(
         if coords:
             await db.execute(
                 text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-                {"lat": coords[0], "lon": coords[1], "id": str(patient_id)},
+                {"lat": enc_float(coords[0]), "lon": enc_float(coords[1]),
+                 "id": str(patient_id)},
             )
 
     await audit.log(
@@ -442,7 +491,15 @@ async def update_patient(
         patient_id=patient_id,
         resource_type="patient",
         resource_id=patient_id,
-        previous_state=dict(existing),
+        # `existing` is already a plain dict (decrypted above).
+        # KNOWN GAP (pre-existing, not introduced here): the audit log stores
+        # previous_state/new_state as plaintext, so PHI values land unencrypted
+        # in `audit_logs` even though `patients` is now encrypted. That is a
+        # real hole in the encryption story and needs its own pass — either
+        # encrypt these JSON blobs or store only the field NAMES that changed
+        # rather than their values. Tracked separately; not fixed here because
+        # it touches every audit call site, not just this one.
+        previous_state=existing,
         new_state=updates,
     )
 
@@ -515,7 +572,7 @@ async def get_patient_summary(
         text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
         {"id": str(patient_id)},
     )
-    patient = patient_result.mappings().first()
+    patient = decrypt_patient_row(patient_result.mappings().first())
     if not patient:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
 
@@ -580,7 +637,7 @@ async def get_patient_summary(
 
     return {
         "data": {
-            "patient":       dict(patient),
+            "patient":       patient,
             "vitals":        vitals,
             "medications":   medications,
             "visits":        visits,
@@ -620,7 +677,7 @@ async def get_patient_chart(
         text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
         {"id": str(patient_id)},
     )
-    patient = patient_result.mappings().first()
+    patient = decrypt_patient_row(patient_result.mappings().first())
     if not patient:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
 
@@ -693,7 +750,7 @@ async def get_patient_chart(
 
     return {
         "data": {
-            "patient":      dict(patient),
+            "patient":      patient,
             "visits":       visits,
             "vitals":       vitals,
             "medications":  medications,
@@ -777,7 +834,11 @@ async def get_patient_map_locations(
         """),
         params,
     )
-    return {"data": [dict(r) for r in result.mappings().all()]}
+    # Decrypt: this SELECT pulls address_line1, phone, latitude and longitude.
+    # dec_float() casts the coordinates back to real numbers, which is what
+    # the Leaflet map on the frontend expects — it does `p.latitude != null`
+    # and passes them straight into L.marker([lat, lng]).
+    return {"data": decrypt_patient_rows(result.mappings().all())}
 
 
 @router.post(
@@ -809,15 +870,21 @@ async def backfill_geocode(
             LIMIT 200
         """),
     )
+    # The `address_line1 IS NOT NULL` and `latitude IS NULL` predicates in the
+    # query above still work correctly against encrypted TEXT columns — NULL
+    # is NULL regardless of encryption, which is exactly why this filter did
+    # not need to change.
     rows = result.mappings().all()
     updated = 0
     for r in rows:
-        addr = build_address_string(r["address_line1"], r["city"], r["state"], r["zip"])
+        row = decrypt_patient_row(r)   # address_line1 is ciphertext on disk
+        addr = build_address_string(row["address_line1"], row["city"], row["state"], row["zip"])
         coords = await geocode_address(addr)
         if coords:
             await db.execute(
                 text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-                {"lat": coords[0], "lon": coords[1], "id": str(r["id"])},
+                {"lat": enc_float(coords[0]), "lon": enc_float(coords[1]),
+                 "id": str(row["id"])},
             )
             updated += 1
 
@@ -888,6 +955,29 @@ async def import_patients_csv(
         blood = (r.get("blood_type") or "").strip().lower()
         blood = blood if blood in valid_blood else None
 
+        # Bulk import is a WRITE PATH and must encrypt exactly like the
+        # single-record create does. If it did not, every CSV-imported
+        # patient would sit in the database with a plaintext phone, email and
+        # street address while the rest of the table was encrypted — the
+        # encryption would be quietly bypassed at the highest-volume entry
+        # point in the product. Column-name-keyed params, same as create.
+        row_params = encrypt_patient_fields({
+            "organization_id":   str(current_user.organization_id),
+            "first_name":        first,
+            "last_name":         last,
+            "date_of_birth":     dob_val,
+            "gender":            gender,
+            "city":              r.get("city") or None,
+            "state":             r.get("state") or None,
+            "zip":               r.get("zip") or r.get("zip_code") or r.get("postal_code") or None,
+            "blood_type":        blood,
+            "primary_diagnosis": r.get("primary_diagnosis") or r.get("diagnosis") or None,
+            # ── encrypted ───────────────────────────────────────────
+            "phone":             r.get("phone") or None,
+            "email":             r.get("email") or None,
+            "address_line1":     r.get("address_line1") or r.get("address") or None,
+        })
+
         try:
             await db.execute(
                 text("""
@@ -896,24 +986,12 @@ async def import_patients_csv(
                         gender, phone, email, address_line1, city, state, zip,
                         blood_type, primary_diagnosis, status
                     ) VALUES (
-                        :org, :fn, :ln, :dob,
-                        :gender, :phone, :email, :addr1, :city, :state, :zip,
-                        :blood, :dx, 'active'
+                        :organization_id, :first_name, :last_name, :date_of_birth,
+                        :gender, :phone, :email, :address_line1, :city, :state, :zip,
+                        :blood_type, :primary_diagnosis, 'active'
                     )
                 """),
-                {
-                    "org": str(current_user.organization_id),
-                    "fn": first, "ln": last, "dob": dob_val,
-                    "gender": gender,
-                    "phone": r.get("phone") or None,
-                    "email": r.get("email") or None,
-                    "addr1": r.get("address_line1") or r.get("address") or None,
-                    "city": r.get("city") or None,
-                    "state": r.get("state") or None,
-                    "zip": r.get("zip") or r.get("zip_code") or r.get("postal_code") or None,
-                    "blood": blood,
-                    "dx": r.get("primary_diagnosis") or r.get("diagnosis") or None,
-                },
+                row_params,
             )
             created += 1
         except Exception as e:
