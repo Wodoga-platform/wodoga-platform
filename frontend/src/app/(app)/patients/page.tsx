@@ -1,1065 +1,594 @@
-"""
-Wodoga Platform — Patients API
-GET    /api/v1/patients              List all patients (paginated, filterable)
-POST   /api/v1/patients              Create a new patient record
-GET    /api/v1/patients/{id}         Get a single patient's full record
-PATCH  /api/v1/patients/{id}         Update patient information
-DELETE /api/v1/patients/{id}         Soft-delete a patient record
-GET    /api/v1/patients/{id}/summary Full patient summary (all linked records)
-"""
-
-from typing import Optional
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, date
-
-from app.core.audit import AuditAction, AuditLogger
-from app.core.permissions import Permission, TokenPayload, require_permissions, require_any_permission
-from app.core.phi_crypto import (
-    dec_scalar,
-    enc_float,
-    encrypt_patient_fields,
-    decrypt_patient_row,
-    decrypt_patient_rows,
-)
-from app.dependencies import (
-    get_audit_logger,
-    get_client_ip,
-    get_current_user_payload,
-    get_db_for_tenant,
-)
-
-router = APIRouter(prefix="/patients", tags=["Patients"])
-
-
-# ── Schemas ────────────────────────────────────────────────────
-
-# Normalizers applied at the API boundary so that near-miss values from any
-# client (a form sending "Non-binary", a script sending "MALE") are coerced to
-# the exact tokens the database CHECK constraints require. This mirrors the
-# normalization the CSV importer already does, closing the gap where the
-# single-record create/update path had none — the same "normalize at every
-# entry point" lesson that bit us on enum casing before.
-
-_VALID_GENDERS = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
-_VALID_BLOOD = {"a+", "a-", "b+", "b-", "ab+", "ab-", "o+", "o-", "unknown"}
-
-
-def _normalize_gender_value(v):
-    """Coerce a gender string to the DB's allowed token, or leave it for the
-    DB to reject if it's genuinely not a recognized value."""
-    if v is None:
-        return None
-    s = str(v).strip().lower().replace("-", "_").replace(" ", "_")
-    if not s:
-        return None
-    return s if s in _VALID_GENDERS else s  # pass through; DB constraint is final arbiter
-
-
-def _normalize_blood_value(v):
-    """Coerce a blood type to the DB's notation: uppercase letters (A+, O-,
-    AB+), with the sole exception of 'unknown', which the constraint stores
-    lowercase. Checked against the real schema.sql CHECK constraint."""
-    if v is None:
-        return None
-    s = str(v).strip()
-    if not s:
-        return None
-    if s.lower() == "unknown":
-        return "unknown"
-    return s.upper()
-
-
-class PatientCreate(BaseModel):
-    first_name: str
-    last_name: str
-    date_of_birth: date
-    gender: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[EmailStr] = None
-    address_line1: Optional[str] = None
-    address_line2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    blood_type: Optional[str] = None
-    primary_diagnosis: Optional[str] = None
-    secondary_diagnoses: Optional[list[str]] = []
-    allergies: Optional[list[str]] = []
-    medical_history: Optional[str] = None
-    emergency_contact: Optional[dict] = None
-    insurance_primary: Optional[dict] = None
-    insurance_secondary: Optional[dict] = None
-    assigned_caregiver: Optional[UUID] = None
-    assigned_provider: Optional[UUID] = None
-    assigned_pharmacy_staff: Optional[UUID] = None
-    fall_risk: Optional[str] = None
-    notes: Optional[str] = None
-
-    @field_validator("gender", mode="before")
-    @classmethod
-    def _normalize_gender(cls, v):
-        return _normalize_gender_value(v)
-
-    @field_validator("blood_type", mode="before")
-    @classmethod
-    def _normalize_blood(cls, v):
-        return _normalize_blood_value(v)
-
-
-class PatientUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    date_of_birth: Optional[date] = None
-    gender: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[EmailStr] = None
-    address_line1: Optional[str] = None
-    address_line2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    blood_type: Optional[str] = None
-    primary_diagnosis: Optional[str] = None
-    secondary_diagnoses: Optional[list[str]] = None
-    allergies: Optional[list[str]] = None
-    medical_history: Optional[str] = None
-    emergency_contact: Optional[dict] = None
-    insurance_primary: Optional[dict] = None
-    insurance_secondary: Optional[dict] = None
-    assigned_caregiver: Optional[UUID] = None
-    assigned_provider: Optional[UUID] = None
-    assigned_pharmacy_staff: Optional[UUID] = None
-    fall_risk: Optional[str] = None
-    status: Optional[str] = None
-    notes: Optional[str] = None
-
-    @field_validator("gender", mode="before")
-    @classmethod
-    def _normalize_gender(cls, v):
-        return _normalize_gender_value(v)
-
-    @field_validator("blood_type", mode="before")
-    @classmethod
-    def _normalize_blood(cls, v):
-        return _normalize_blood_value(v)
-
-
-# ── List Patients ─────────────────────────────────────────────
-@router.get(
-    "",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def list_patients(
-    request: Request,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(25, ge=1, le=100),
-    search: Optional[str] = Query(None, description="Search by name, diagnosis, or MRN"),
-    status: Optional[str] = Query(None),
-    caregiver_id: Optional[UUID] = Query(None),
-    provider_id: Optional[UUID] = Query(None),
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns a paginated list of patients for the current organization.
-    RLS ensures only this organization's patients are ever returned.
-    Supports search, status filter, and caregiver/provider filter.
-    """
-    offset = (page - 1) * per_page
-
-    # Build the WHERE clause dynamically
-    conditions = ["p.deleted_at IS NULL"]
-    params: dict = {"limit": per_page, "offset": offset}
-
-    if search:
-        conditions.append(
-            "(p.first_name ILIKE :search OR p.last_name ILIKE :search "
-            "OR p.primary_diagnosis ILIKE :search OR p.mrn ILIKE :search "
-            "OR CONCAT(p.first_name, ' ', p.last_name) ILIKE :search)"
-        )
-        params["search"] = f"%{search}%"
-
-    if status:
-        conditions.append("p.status = :status")
-        params["status"] = status
-
-    if caregiver_id:
-        conditions.append("p.assigned_caregiver = :caregiver_id")
-        params["caregiver_id"] = str(caregiver_id)
-
-    if provider_id:
-        conditions.append("p.assigned_provider = :provider_id")
-        params["provider_id"] = str(provider_id)
-
-    # Caregivers can only see their assigned patients
-    if current_user.role == "caregiver":
-        conditions.append("p.assigned_caregiver = :current_user_id")
-        params["current_user_id"] = str(current_user.user_id)
-
-    where = " AND ".join(conditions)
-
-    result = await db.execute(
-        text(f"""
-            SELECT
-                p.id, p.mrn, p.first_name, p.last_name,
-                p.date_of_birth, p.gender, p.phone, p.email,
-                p.primary_diagnosis, p.status, p.fall_risk,
-                p.insurance_primary,
-                p.assigned_caregiver, p.assigned_provider,
-                p.created_at, p.updated_at,
-                CONCAT(cg.first_name, ' ', cg.last_name) AS caregiver_name,
-                CONCAT(pv.first_name, ' ', pv.last_name) AS provider_name,
-                COUNT(*) OVER() AS total_count
-            FROM patients p
-            LEFT JOIN users cg ON cg.id = p.assigned_caregiver
-            LEFT JOIN users pv ON pv.id = p.assigned_provider
-            WHERE {where}
-            ORDER BY p.last_name ASC, p.first_name ASC
-            LIMIT :limit OFFSET :offset
-        """),
-        params,
-    )
-    rows = result.mappings().all()
-
-    total = rows[0]["total_count"] if rows else 0
-
-    # Decrypt PHI (this SELECT pulls phone, email, insurance_primary).
-    # NOTE: `search` above still only matches first_name / last_name /
-    # primary_diagnosis / mrn — the columns we deliberately left in
-    # plaintext. Searching by phone or email is not possible and never was;
-    # encrypted columns cannot be matched with ILIKE.
-    patients = decrypt_patient_rows(rows)
-
-    # Strip total_count from individual patient records
-    for p in patients:
-        p.pop("total_count", None)
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Listed patients (page {page}, search: {search or 'none'})",
-    )
-
-    return {
-        "data": patients,
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "pages": -(-total // per_page),  # Ceiling division
-        },
-    }
-
-
-# ── Get Single Patient ────────────────────────────────────────
-@router.get(
-    "/{patient_id}",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient(
-    patient_id: UUID,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns the full record for a single patient.
-    RLS ensures only patients in the current organization are accessible.
-    Every access to a patient record is logged — HIPAA requirement.
-    """
-    result = await db.execute(
-        text("""
-            SELECT
-                p.*,
-                CONCAT(cg.first_name, ' ', cg.last_name) AS caregiver_name,
-                CONCAT(pv.first_name, ' ', pv.last_name) AS provider_name,
-                CONCAT(ph.first_name, ' ', ph.last_name) AS pharmacy_staff_name
-            FROM patients p
-            LEFT JOIN users cg ON cg.id = p.assigned_caregiver
-            LEFT JOIN users pv ON pv.id = p.assigned_provider
-            LEFT JOIN users ph ON ph.id = p.assigned_pharmacy_staff
-            WHERE p.id = :id AND p.deleted_at IS NULL
-        """),
-        {"id": str(patient_id)},
-    )
-    patient = result.mappings().first()
-
-    if not patient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": "Patient not found."},
-        )
-
-    # Caregivers can only access their assigned patients
-    if (
-        current_user.role == "caregiver"
-        and str(patient["assigned_caregiver"]) != str(current_user.user_id)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "message": "You are not assigned to this patient."},
-        )
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Viewed patient record: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-    )
-
-    # Decrypt PHI first, THEN apply the biller strip below. Order matters:
-    # the strip removes keys, and decrypt_patient_row only touches keys that
-    # are present — so decrypting after the strip would still be correct, but
-    # decrypting first keeps a single, predictable shape for the row and
-    # means any future consumer of patient_data gets real values.
-    patient_data = decrypt_patient_row(patient)
-
-    # ── Role-based field filtering (HIPAA minimum-necessary) ─────────
-    # Billers need patient identifiers, demographics, insurance, and
-    # billing-relevant clinical codes (diagnoses for ICD billing). They do
-    # NOT need free-text clinical fields like allergies, medical history,
-    # or notes. This is the Critical #1 finding from PERMISSION_AUDIT_V2.md
-    # — closing the HIPAA minimum-necessary gap for the biller role.
-    if current_user.role == "biller":
-        clinical_fields_to_strip = (
-            "allergies", "medical_history",
-            "secondary_diagnoses", "notes", "photo_url",
-            "fall_risk", "blood_type",
-        )
-        for field in clinical_fields_to_strip:
-            patient_data.pop(field, None)
-
-    return {"data": patient_data}
-
-
-# ── Create Patient ────────────────────────────────────────────
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_CREATE))],
-)
-async def create_patient(
-    body: PatientCreate,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """Creates a new patient record for the current organization."""
-    # ── PHI encryption ───────────────────────────────────────────────
-    # Every parameter below is bound under its REAL COLUMN NAME, not an
-    # abbreviation. That is deliberate: encrypt_patient_fields() keys off
-    # column names, so if the SQL and the param dict ever drift apart, the
-    # encryption would silently skip a field and write plaintext PHI. Using
-    # the column name as the single identifier in both places makes that
-    # class of bug impossible.
-    params = {
-        "organization_id":     str(current_user.organization_id),
-        "first_name":          body.first_name,
-        "last_name":           body.last_name,
-        "date_of_birth":       body.date_of_birth,
-        "gender":              body.gender,
-        "city":                body.city,
-        "state":               body.state,
-        "zip":                 body.zip,
-        "blood_type":          body.blood_type,
-        "primary_diagnosis":   body.primary_diagnosis,
-        "fall_risk":           body.fall_risk,
-        "assigned_caregiver":  str(body.assigned_caregiver) if body.assigned_caregiver else None,
-        "assigned_provider":   str(body.assigned_provider) if body.assigned_provider else None,
-        # ── everything below this line gets encrypted ────────────────
-        "phone":               body.phone,
-        "email":               body.email,
-        "address_line1":       body.address_line1,
-        "address_line2":       body.address_line2,
-        "medical_history":     body.medical_history,
-        "notes":               body.notes,
-        "secondary_diagnoses": body.secondary_diagnoses or [],
-        "allergies":           body.allergies or [],
-        "emergency_contact":   body.emergency_contact,
-        "insurance_primary":   body.insurance_primary,
-        "insurance_secondary": body.insurance_secondary,
-    }
-    params = encrypt_patient_fields(params)
-
-    result = await db.execute(
-        text("""
-            INSERT INTO patients (
-                organization_id, first_name, last_name, date_of_birth,
-                gender, phone, email, address_line1, address_line2,
-                city, state, zip, blood_type, primary_diagnosis,
-                secondary_diagnoses, allergies, medical_history,
-                emergency_contact, insurance_primary, insurance_secondary,
-                assigned_caregiver, assigned_provider, fall_risk, notes
-            ) VALUES (
-                :organization_id, :first_name, :last_name, :date_of_birth,
-                :gender, :phone, :email, :address_line1, :address_line2,
-                :city, :state, :zip, :blood_type, :primary_diagnosis,
-                :secondary_diagnoses, :allergies, :medical_history,
-                :emergency_contact, :insurance_primary, :insurance_secondary,
-                :assigned_caregiver, :assigned_provider, :fall_risk, :notes
-            )
-            RETURNING id, first_name, last_name, created_at
-        """),
-        params,
-    )
-    new_patient = result.mappings().first()
-
-    # Geocode the address once and cache coordinates (best-effort).
-    # We geocode from `body` — the PLAINTEXT request payload — not from the
-    # params dict, which is now ciphertext.
-    from app.core.geocoding import build_address_string, geocode_address
-    addr = build_address_string(body.address_line1, body.city, body.state, body.zip)
-    coords = await geocode_address(addr)
-    if coords:
-        await db.execute(
-            text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-            # Coordinates are PHI — they pin the patient's home. Encrypt.
-            {"lat": enc_float(coords[0]), "lon": enc_float(coords[1]),
-             "id": str(new_patient["id"])},
-        )
-
-    await audit.log(
-        AuditAction.PATIENT_CREATED,
-        f"Created patient record: {body.first_name} {body.last_name}",
-        patient_id=new_patient["id"],
-        resource_type="patient",
-        resource_id=new_patient["id"],
-        new_state=body.model_dump(),
-    )
-
-    return {"data": dict(new_patient), "message": "Patient record created successfully."}
-
-
-# ── Update Patient ────────────────────────────────────────────
-@router.patch(
-    "/{patient_id}",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_EDIT))],
-)
-async def update_patient(
-    patient_id: UUID,
-    body: PatientUpdate,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Updates one or more fields on a patient record.
-    Only provided fields are updated — others remain unchanged.
-    Both before and after states are captured in the audit log.
-    """
-    # Fetch current state for the audit log AND for the geocode fallback
-    # below. This is a SELECT *, so every PHI column comes back as
-    # ciphertext — decrypt it once, here, and use the decrypted dict
-    # everywhere downstream.
-    result = await db.execute(
-        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    existing_row = result.mappings().first()
-    if not existing_row:
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Patient not found."})
-    existing = decrypt_patient_row(existing_row)
-
-    # Build dynamic UPDATE
-    updates = body.model_dump(exclude_none=True)
-    if not updates:
-        return {"data": existing, "message": "No changes provided."}
-
-    set_clauses = []
-    params = {"id": str(patient_id)}
-
-    # ALLOWLIST — every updatable column. Values are checked against this
-    # before being interpolated into the SET clause, which is what keeps the
-    # dynamic SQL safe.
-    #
-    # NOTE — BUG FIX: emergency_contact, insurance_primary and
-    # insurance_secondary were previously MISSING from this map. Because the
-    # loop below only acts on fields found in the map, a PATCH containing any
-    # of those three silently did nothing — the request returned 200 and the
-    # data was never written. The `json_fields` set that used to sit below
-    # this map was therefore dead code. They are added here.
-    field_map = {
-        "first_name": "first_name", "last_name": "last_name",
-        "date_of_birth": "date_of_birth", "gender": "gender",
-        "phone": "phone", "email": "email",
-        "address_line1": "address_line1", "address_line2": "address_line2",
-        "city": "city", "state": "state", "zip": "zip",
-        "blood_type": "blood_type", "primary_diagnosis": "primary_diagnosis",
-        "secondary_diagnoses": "secondary_diagnoses", "allergies": "allergies",
-        "medical_history": "medical_history", "fall_risk": "fall_risk",
-        "status": "status", "notes": "notes",
-        "emergency_contact": "emergency_contact",
-        "insurance_primary": "insurance_primary",
-        "insurance_secondary": "insurance_secondary",
-        "assigned_caregiver": "assigned_caregiver",
-        "assigned_provider": "assigned_provider",
-        "assigned_pharmacy_staff": "assigned_pharmacy_staff",
-    }
-
-    for field, value in updates.items():
-        if field in field_map:
-            set_clauses.append(f"{field_map[field]} = :{field}")
-            params[field] = str(value) if isinstance(value, UUID) else value
-
-    if not set_clauses:
-        return {"data": existing, "message": "No valid fields to update."}
-
-    # Encrypt whichever PHI columns this PATCH actually touched. Fields not
-    # present in `params` are left alone, so partial updates stay partial.
-    # No json.dumps() is needed — enc_json() serialises dicts itself.
-    params = encrypt_patient_fields(params)
-
-    await db.execute(
-        text(f"UPDATE patients SET {', '.join(set_clauses)}, updated_at = NOW() WHERE id = :id"),
-        params,
-    )
-
-    # If any address field changed, re-geocode and refresh cached coordinates
-    address_fields = {"address_line1", "city", "state", "zip"}
-    if address_fields & set(updates.keys()):
-        from app.core.geocoding import build_address_string, geocode_address
-        # `updates` is the plaintext request body and `existing` is the
-        # DECRYPTED row, so the address string built here is real text. If
-        # `existing` were used raw, a PATCH that changed only `city` would
-        # feed the geocoder a base64 blob for address_line1.
-        addr = build_address_string(
-            updates.get("address_line1", existing["address_line1"]),
-            updates.get("city", existing["city"]),
-            updates.get("state", existing["state"]),
-            updates.get("zip", existing["zip"]),
-        )
-        coords = await geocode_address(addr)
-        if coords:
-            await db.execute(
-                text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-                {"lat": enc_float(coords[0]), "lon": enc_float(coords[1]),
-                 "id": str(patient_id)},
-            )
-
-    await audit.log(
-        AuditAction.PATIENT_UPDATED,
-        f"Updated patient: {existing['first_name']} {existing['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-        # `existing` is already a plain dict (decrypted above).
-        # KNOWN GAP (pre-existing, not introduced here): the audit log stores
-        # previous_state/new_state as plaintext, so PHI values land unencrypted
-        # in `audit_logs` even though `patients` is now encrypted. That is a
-        # real hole in the encryption story and needs its own pass — either
-        # encrypt these JSON blobs or store only the field NAMES that changed
-        # rather than their values. Tracked separately; not fixed here because
-        # it touches every audit call site, not just this one.
-        previous_state=existing,
-        new_state=updates,
-    )
-
-    return {"message": "Patient record updated successfully."}
-
-
-# ── Delete Patient (Soft) ─────────────────────────────────────
-@router.delete(
-    "/{patient_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_DELETE))],
-)
-async def delete_patient(
-    patient_id: UUID,
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Soft-deletes a patient record by setting deleted_at.
-    The record is preserved in the database for HIPAA compliance.
-    Hard deletion is never performed.
-    """
-    result = await db.execute(
-        text("SELECT first_name, last_name FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    patient = result.mappings().first()
-    if not patient:
-        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Patient not found."})
-
-    await db.execute(
-        text("UPDATE patients SET deleted_at = NOW(), deleted_by = :uid WHERE id = :id"),
-        {"id": str(patient_id), "uid": str(current_user.user_id)},
-    )
-
-    await audit.log(
-        AuditAction.PATIENT_DELETED,
-        f"Soft-deleted patient: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-    )
-
-
-# ── Patient Summary (All Linked Records) ──────────────────────
-@router.get(
-    "/{patient_id}/summary",
-    dependencies=[
-        Depends(require_permissions(Permission.PATIENTS_VIEW)),
-        # Summary aggregates vitals, meds, visits, care plan — clinical PHI
-        Depends(require_any_permission(
-            Permission.VISITS_VIEW,
-            Permission.VITALS_VIEW,
-            Permission.MEDS_VIEW,
-        )),
-    ],
-)
-async def get_patient_summary(
-    patient_id: UUID,
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns a complete summary of a patient including their most recent
-    vitals, active medications, upcoming visits, active care plan,
-    and latest billing status. Used for the patient detail panel.
-    """
-    patient_result = await db.execute(
-        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    patient = decrypt_patient_row(patient_result.mappings().first())
-    if not patient:
-        raise HTTPException(status_code=404, detail={"error": "not_found"})
-
-    # Latest vitals
-    vitals_result = await db.execute(
-        text("SELECT * FROM vitals WHERE patient_id = :id ORDER BY recorded_at DESC LIMIT 5"),
-        {"id": str(patient_id)},
-    )
-    vitals = [dict(r) for r in vitals_result.mappings().all()]
-
-    # Active medications
-    meds_result = await db.execute(
-        text("SELECT * FROM medications WHERE patient_id = :id AND status = 'active' ORDER BY drug_name"),
-        {"id": str(patient_id)},
-    )
-    medications = [dict(r) for r in meds_result.mappings().all()]
-
-    # Upcoming visits
-    visits_result = await db.execute(
-        text("""
-            SELECT v.*, CONCAT(u.first_name, ' ', u.last_name) as caregiver_name
-            FROM visits v
-            LEFT JOIN users u ON u.id = v.caregiver_id
-            WHERE v.patient_id = :id AND v.status IN ('scheduled', 'in_progress')
-            ORDER BY v.visit_date ASC, v.visit_time ASC
-            LIMIT 5
-        """),
-        {"id": str(patient_id)},
-    )
-    visits = [dict(r) for r in visits_result.mappings().all()]
-
-    # Active care plan
-    care_plan_result = await db.execute(
-        text("SELECT * FROM care_plans WHERE patient_id = :id AND status = 'active' LIMIT 1"),
-        {"id": str(patient_id)},
-    )
-    care_plan = care_plan_result.mappings().first()
-
-    # Billing summary
-    billing_result = await db.execute(
-        text("""
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
-                COUNT(*) FILTER (WHERE status = 'approved') as approved_count,
-                COUNT(*) FILTER (WHERE status = 'denied') as denied_count,
-                COALESCE(SUM(amount_billed), 0) as total_billed,
-                COALESCE(SUM(amount_paid), 0) as total_paid
-            FROM billing_claims
-            WHERE patient_id = :id
-        """),
-        {"id": str(patient_id)},
-    )
-    billing_summary = billing_result.mappings().first()
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Viewed patient summary: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id,
-        resource_type="patient",
-        resource_id=patient_id,
-    )
-
-    return {
-        "data": {
-            "patient":       patient,
-            "vitals":        vitals,
-            "medications":   medications,
-            "visits":        visits,
-            "care_plan":     dict(care_plan) if care_plan else None,
-            "billing":       dict(billing_summary),
+'use client';
+
+import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import toast from 'react-hot-toast';
+import { Home, Pill, Plus, Search, Upload, Users } from 'lucide-react';
+import {
+  Button, Badge, Avatar, EmptyState, PageLoader,
+  StatCard, InfoField, Alert, Gated,
+} from '@/components/ui';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { patientService, visitService, medicationService } from '@/services';
+import {
+  fmtDate, calcAge, cn, PATIENT_STATUS_BADGE,
+  FALL_RISK_BADGE, truncate,
+} from '@/utils';
+import type { Patient } from '@/types';
+
+// ── Schema ─────────────────────────────────────────────────────
+const patientSchema = z.object({
+  first_name:        z.string().min(1, 'Required'),
+  last_name:         z.string().min(1, 'Required'),
+  date_of_birth:     z.string().min(1, 'Required'),
+  gender:            z.string().optional(),
+  phone:             z.string().optional(),
+  email:             z.string().email().optional().or(z.literal('')),
+  address_line1:     z.string().optional(),
+  city:              z.string().optional(),
+  state:             z.string().optional(),
+  zip:               z.string().optional(),
+  blood_type:        z.string().optional(),
+  primary_diagnosis: z.string().optional(),
+  allergies_str:     z.string().optional(),
+  medical_history:   z.string().optional(),
+  insurance_provider: z.string().optional(),
+  insurance_member_id: z.string().optional(),
+  notes:             z.string().optional(),
+});
+
+type PatientForm = z.infer<typeof patientSchema>;
+
+// ════════════════════════════════════════════════════════════
+// PATIENTS PAGE
+// ════════════════════════════════════════════════════════════
+export default function PatientsPage() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  const [search,       setSearch]       = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page,         setPage]         = useState(1);
+  const [createOpen,   setCreateOpen]   = useState(false);
+  const [selected,     setSelected]     = useState<Patient | null>(null);
+  const [detailTab,    setDetailTab]    = useState<'info' | 'vitals' | 'meds' | 'visits' | 'billing'>('info');
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Queries ────────────────────────────────────────────────
+  const { data, isLoading } = useQuery({
+    queryKey: ['patients', 'list', search, statusFilter, page],
+    queryFn:  () => patientService.list({ search, status: statusFilter, page, per_page: 25 }),
+    placeholderData: (prev) => prev,
+  });
+
+  const { data: summary } = useQuery({
+    queryKey: ['patients', 'summary', selected?.id],
+    queryFn:  () => patientService.summary(selected!.id),
+    enabled:  !!selected?.id,
+  });
+
+  // ── Mutations ──────────────────────────────────────────────
+  const createMutation = useMutation({
+    mutationFn: (body: Partial<Patient>) => patientService.create(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      toast.success('Patient folder created ✓');
+      setCreateOpen(false);
+      reset();
+    },
+    onError: (err: any) => toast.error(err?.message || 'Failed to create patient.'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => patientService.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      toast.success('Patient record deleted.');
+      setSelected(null);
+    },
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (file: File) => patientService.importCsv(file),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      setImportResult(res.data);
+      toast.success(res.message);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail?.message || 'CSV import failed.'),
+  });
+
+  // ── Form ───────────────────────────────────────────────────
+  const { register, handleSubmit, formState: { errors }, reset } = useForm<PatientForm>({
+    resolver: zodResolver(patientSchema),
+  });
+
+  const onSubmit = (data: PatientForm) => {
+    const { allergies_str, insurance_provider, insurance_member_id, ...rest } = data;
+    createMutation.mutate({
+      ...(rest as any),
+      email:     rest.email || undefined,
+      allergies: allergies_str ? allergies_str.split(',').map(s => s.trim()).filter(Boolean) : [],
+      insurance_primary: insurance_provider
+        ? { provider: insurance_provider, member_id: insurance_member_id || '' }
+        : undefined,
+    });
+  };
+
+  const patients    = data?.data       || [];
+  const pagination  = data?.pagination;
+
+  return (
+    <>
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="page-title">Patient Records</h1>
+          <p className="page-subtitle">
+            {pagination?.total ?? '—'} total records — click any row to open the full record
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) importMutation.mutate(f);
+              if (csvInputRef.current) csvInputRef.current.value = '';
+            }}
+          />
+          <Gated permission="patients:create">
+            <Button variant="secondary" size="sm" icon={<Upload size={13} />}
+              loading={importMutation.isPending}
+              onClick={() => csvInputRef.current?.click()}>Import CSV</Button>
+            <Button variant="primary"   size="sm" icon={<Plus   size={13} />} onClick={() => setCreateOpen(true)}>
+              New Patient
+            </Button>
+          </Gated>
+        </div>
+      </div>
+
+      <div className="flex gap-5">
+        {/* ── Table ── */}
+        <div className={cn('flex-1 min-w-0', selected ? 'max-w-[calc(100%-440px)]' : '')}>
+          <div className="card">
+            {/* Filters */}
+            <div className="card-header">
+              <div>
+                <div className="text-sm font-bold">All Patients</div>
+                <div className="text-xs text-ink-3 mt-0.5">{pagination?.total || 0} records</div>
+              </div>
+              <div className="flex gap-2">
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4" />
+                  <input
+                    className="form-input pl-7 py-1.5 w-48 text-xs"
+                    placeholder="Search patients..."
+                    value={search}
+                    onChange={e => { setSearch(e.target.value); setPage(1); }}
+                  />
+                </div>
+                <select
+                  className="form-select py-1.5 text-xs w-32"
+                  value={statusFilter}
+                  onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+                >
+                  <option value="">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="discharged">Discharged</option>
+                  <option value="on_hold">On Hold</option>
+                </select>
+              </div>
+            </div>
+
+            {isLoading ? <PageLoader /> : patients.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="No patients found"
+                description={search ? `No results for "${search}"` : 'Add your first patient to get started.'}
+                action={
+                  <Gated permission="patients:create">
+                    <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>Add Patient</Button>
+                  </Gated>
+                }
+              />
+            ) : (
+              <>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Patient</th>
+                      <th>Age / DOB</th>
+                      <th>Diagnosis</th>
+                      <th>Insurance</th>
+                      <th>Caregiver</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {patients.map(p => {
+                      const sb = PATIENT_STATUS_BADGE[p.status] || { label: p.status, variant: 'gray' as const };
+                      const isActive = selected?.id === p.id;
+                      return (
+                        <tr
+                          key={p.id}
+                          onClick={() => router.push(`/patients/${p.id}`)}
+                          className={cn(isActive && 'bg-forest-ghost/40', 'cursor-pointer')}
+                        >
+                          <td>
+                            <div className="flex items-center gap-2.5">
+                              <Avatar firstName={p.first_name} lastName={p.last_name} seed={p.id} size="sm" />
+                              <div>
+                                <div className="font-semibold text-sm">{p.first_name} {p.last_name}</div>
+                                <div className="text-xs text-ink-3">{p.phone || '—'}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="text-xs">
+                            <span className="font-medium">{calcAge(p.date_of_birth)}</span>
+                            <span className="text-ink-3 ml-1.5">{fmtDate(p.date_of_birth)}</span>
+                          </td>
+                          <td className="text-xs max-w-[160px]">{truncate(p.primary_diagnosis, 40) || '—'}</td>
+                          <td className="text-xs">{p.insurance_primary?.provider || '—'}</td>
+                          <td className="text-xs">{p.caregiver_name || <span className="text-ink-4">Unassigned</span>}</td>
+                          <td><Badge variant={sb.variant}>{sb.label}</Badge></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Pagination */}
+                {pagination && pagination.pages > 1 && (
+                  <div className="flex items-center justify-between px-5 py-3 border-t border-surface-border text-xs text-ink-3">
+                    <span>Page {pagination.page} of {pagination.pages}</span>
+                    <div className="flex gap-1.5">
+                      <Button size="xs" variant="secondary" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</Button>
+                      <Button size="xs" variant="secondary" disabled={page >= pagination.pages} onClick={() => setPage(p => p + 1)}>Next →</Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Detail Panel ── */}
+        {selected && (
+          <div className="w-[420px] flex-shrink-0">
+            <div className="card sticky top-5">
+              {/* Panel header */}
+              <div className="p-5 pb-4 bg-gradient-to-br from-forest-ghost to-white border-b border-surface-border">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <Avatar firstName={selected.first_name} lastName={selected.last_name}
+                            seed={selected.id} size="lg" square />
+                    <div>
+                      <div className="font-display text-lg font-semibold">
+                        {selected.first_name} {selected.last_name}
+                      </div>
+                      <div className="text-xs text-ink-3 mt-0.5">
+                        {calcAge(selected.date_of_birth)} · {fmtDate(selected.date_of_birth)}
+                        {selected.blood_type && ` · ${selected.blood_type}`}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelected(null)}
+                    className="w-7 h-7 flex items-center justify-center rounded border border-surface-border
+                               text-ink-3 hover:bg-red-ghost hover:text-red transition-colors text-xs"
+                  >✕</button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-0.5 mt-4 bg-surface-2 rounded p-0.5">
+                  {(['info', 'meds', 'visits', 'billing'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setDetailTab(tab)}
+                      className={cn(
+                        'flex-1 py-1.5 text-[11px] font-semibold rounded capitalize transition-all',
+                        detailTab === tab
+                          ? 'bg-white text-forest shadow-xs'
+                          : 'text-ink-3 hover:text-ink',
+                      )}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-5 max-h-[65vh] overflow-y-auto">
+                {/* Info tab */}
+                {detailTab === 'info' && (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="section-title">Demographics</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <InfoField label="Gender"     value={selected.gender} />
+                        <InfoField label="Blood Type" value={selected.blood_type} />
+                        <InfoField label="Phone"      value={selected.phone} />
+                        <InfoField label="Email"      value={selected.email} />
+                      </div>
+                      <InfoField label="Address" value={[selected.address_line1, selected.city, selected.state, selected.zip].filter(Boolean).join(', ')} />
+                    </div>
+                    <div>
+                      <div className="section-title">Medical</div>
+                      <InfoField label="Primary Diagnosis" value={<strong>{selected.primary_diagnosis}</strong>} />
+                      <InfoField label="Allergies"
+                        value={selected.allergies?.length
+                          ? <span className="text-red font-semibold">{selected.allergies.join(', ')}</span>
+                          : 'None known'} />
+                      {selected.medical_history && (
+                        <InfoField label="Medical History" value={selected.medical_history} />
+                      )}
+                      {selected.fall_risk && (
+                        <InfoField label="Fall Risk"
+                          value={<Badge variant={FALL_RISK_BADGE[selected.fall_risk]?.variant || 'gray'}>
+                            {FALL_RISK_BADGE[selected.fall_risk]?.label || selected.fall_risk}
+                          </Badge>} />
+                      )}
+                    </div>
+                    <div>
+                      <div className="section-title">Insurance</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <InfoField label="Provider" value={selected.insurance_primary?.provider} />
+                        <InfoField label="Member ID" value={selected.insurance_primary?.member_id} />
+                      </div>
+                    </div>
+                    {selected.notes && (
+                      <div>
+                        <div className="section-title">Notes</div>
+                        <p className="text-sm text-ink-2 leading-relaxed">{selected.notes}</p>
+                      </div>
+                    )}
+                    <div className="flex gap-2 pt-2 border-t border-surface-border">
+                      <Gated permission="visits:create">
+                        <Button size="xs" variant="primary" className="flex-1">+ Schedule Visit</Button>
+                      </Gated>
+                      <Gated permission="vitals:create">
+                        <Button size="xs" variant="secondary">+ Vitals</Button>
+                      </Gated>
+                      <Gated permission="patients:delete">
+                        <Button size="xs" variant="danger"
+                          onClick={() => confirm('Delete this patient record? This cannot be undone.') && deleteMutation.mutate(selected.id)}>
+                          Delete
+                        </Button>
+                      </Gated>
+                    </div>
+                  </div>
+                )}
+
+                {/* Meds tab */}
+                {detailTab === 'meds' && (
+                  <div>
+                    {summary?.medications.length === 0 ? (
+                      <EmptyState icon={Pill} title="No prescriptions" />
+                    ) : (
+                      summary?.medications.map(m => (
+                        <div key={m.id} className="flex gap-3 p-3 bg-bg rounded mb-2 border border-surface-border">
+                          <div className="w-9 h-9 bg-purple-pale rounded flex items-center justify-center flex-shrink-0"><Pill size={16} className="text-purple" /></div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-bold">{m.drug_name} <span className="font-normal text-ink-3">{m.dosage}</span></div>
+                            <div className="text-xs text-ink-3">{m.route} · {m.frequency}</div>
+                            <div className="text-xs mt-0.5">
+                              Refills: <span className={cn('font-bold', m.refills_remaining === 0 ? 'text-red' : 'text-forest')}>
+                                {m.refills_remaining}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Visits tab */}
+                {detailTab === 'visits' && (
+                  <div>
+                    {summary?.visits.length === 0 ? (
+                      <EmptyState icon={Home} title="No visits" />
+                    ) : (
+                      summary?.visits.map(v => (
+                        <div key={v.id} className="flex gap-2.5 py-3 border-b border-surface-borderLt last:border-0">
+                          <div className="mt-1.5 w-2.5 h-2.5 rounded-full border-2 border-forest bg-white flex-shrink-0" />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-semibold">{VISIT_TYPE_LABEL[v.visit_type]}</span>
+                              <Badge variant={v.status === 'completed' ? 'green' : v.status === 'scheduled' ? 'blue' : 'gray'}>
+                                {v.status}
+                              </Badge>
+                            </div>
+                            <div className="text-xs text-ink-3">{fmtDate(v.visit_date)}{v.visit_time && ` at ${fmtTime(v.visit_time)}`}</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Billing tab */}
+                {detailTab === 'billing' && (
+                  <div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                      <div className="text-center p-3 bg-bg rounded border border-surface-border">
+                        <div className="text-xl font-bold text-forest font-display">
+                          ${(summary?.billing.total_billed || 0).toFixed(0)}
+                        </div>
+                        <div className="text-[10px] text-ink-3 uppercase tracking-wide mt-1">Total Billed</div>
+                      </div>
+                      <div className="text-center p-3 bg-bg rounded border border-surface-border">
+                        <div className="text-xl font-bold text-blue font-display">
+                          ${(summary?.billing.total_paid || 0).toFixed(0)}
+                        </div>
+                        <div className="text-[10px] text-ink-3 uppercase tracking-wide mt-1">Paid</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-4 text-xs text-ink-3 justify-center">
+                      <span>{summary?.billing.pending_count || 0} pending</span>
+                      <span>{summary?.billing.approved_count || 0} approved</span>
+                      <span className="text-red">{summary?.billing.denied_count || 0} denied</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Create Patient Modal ── */}
+      <Modal
+        open={createOpen}
+        onClose={() => { setCreateOpen(false); reset(); }}
+        title="New Patient Folder"
+        subtitle="Enter complete patient information to create a new record"
+        size="lg"
+        footer={
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => { setCreateOpen(false); reset(); }}>Cancel</Button>
+            <Button variant="primary" loading={createMutation.isPending} onClick={handleSubmit(onSubmit)}>
+              Create Patient Folder
+            </Button>
+          </ModalFooter>
         }
-    }
+      >
+        <form className="space-y-0">
+          <div className="section-title">Demographics</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="form-label">First Name *</label>
+              <input className="form-input" placeholder="Jane" {...register('first_name')} />
+              {errors.first_name && <p className="text-xs text-red mt-1">{errors.first_name.message}</p>}
+            </div>
+            <div>
+              <label className="form-label">Last Name *</label>
+              <input className="form-input" placeholder="Smith" {...register('last_name')} />
+              {errors.last_name && <p className="text-xs text-red mt-1">{errors.last_name.message}</p>}
+            </div>
+            <div>
+              <label className="form-label">Date of Birth *</label>
+              <input type="date" className="form-input" {...register('date_of_birth')} />
+            </div>
+            <div>
+              <label className="form-label">Gender</label>
+              <select className="form-select" {...register('gender')}>
+                <option value="">Select</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="non_binary">Non-binary</option>
+                <option value="other">Other</option>
+                <option value="prefer_not_to_say">Prefer not to say</option>
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Phone</label>
+              <input className="form-input" placeholder="(555) 000-0000" {...register('phone')} />
+            </div>
+            <div>
+              <label className="form-label">Email</label>
+              <input type="email" className="form-input" placeholder="patient@email.com" {...register('email')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+            <div className="col-span-3">
+              <label className="form-label">Address</label>
+              <input className="form-input" placeholder="123 Main St" {...register('address_line1')} />
+            </div>
+            <div><label className="form-label">City</label><input className="form-input" {...register('city')} /></div>
+            <div><label className="form-label">State</label><input className="form-input" placeholder="TX" {...register('state')} /></div>
+            <div><label className="form-label">ZIP</label><input className="form-input" {...register('zip')} /></div>
+          </div>
 
+          <div className="section-title mt-4">Medical</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="form-label">Primary Diagnosis</label>
+              <input className="form-input" placeholder="CHF, COPD..." {...register('primary_diagnosis')} />
+            </div>
+            <div>
+              <label className="form-label">Blood Type</label>
+              <select className="form-select" {...register('blood_type')}>
+                <option value="">Unknown</option>
+                {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(b => <option key={b}>{b}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="form-label">Known Allergies (comma-separated)</label>
+            <input className="form-input" placeholder="Penicillin, Sulfa drugs..." {...register('allergies_str')} />
+          </div>
+          <div className="mb-4">
+            <label className="form-label">Medical History</label>
+            <textarea className="form-textarea" rows={3} placeholder="Relevant history, prior conditions..." {...register('medical_history')} />
+          </div>
 
-@router.get(
-    "/{patient_id}/chart",
-    dependencies=[
-        Depends(require_permissions(Permission.PATIENTS_VIEW)),
-        # PERMISSION_AUDIT_V2 Critical #1: chart contains visits, vitals,
-        # medications — clinical PHI. Requires at least one clinical
-        # view permission, so billers (patients:view only) cannot reach
-        # it even though they have patients:view.
-        Depends(require_any_permission(
-            Permission.VISITS_VIEW,
-            Permission.VITALS_VIEW,
-            Permission.MEDS_VIEW,
-        )),
-    ],
-)
-async def get_patient_chart(
-    patient_id: UUID,
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Returns the COMPLETE patient chart — full history of every linked record:
-    all visits with SOAP notes, all vitals, all medications, all OASIS
-    assessments, all claims, all care plans, and all pharmacy orders.
-    This is the comprehensive patient file.
-    """
-    patient_result = await db.execute(
-        text("SELECT * FROM patients WHERE id = :id AND deleted_at IS NULL"),
-        {"id": str(patient_id)},
-    )
-    patient = decrypt_patient_row(patient_result.mappings().first())
-    if not patient:
-        raise HTTPException(status_code=404, detail={"error": "not_found"})
+          <div className="section-title">Insurance</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="form-label">Insurance Provider</label>
+              <input className="form-input" placeholder="Medicare, Blue Cross..." {...register('insurance_provider')} />
+            </div>
+            <div>
+              <label className="form-label">Member ID</label>
+              <input className="form-input" placeholder="MCR-000000" {...register('insurance_member_id')} />
+            </div>
+          </div>
+          <div>
+            <label className="form-label">Notes</label>
+            <textarea className="form-textarea" rows={2} placeholder="Admission notes..." {...register('notes')} />
+          </div>
+        </form>
+      </Modal>
 
-    # Full visit history (with SOAP notes), most recent first
-    visits_result = await db.execute(
-        text("""
-            SELECT v.*, CONCAT(u.first_name, ' ', u.last_name) AS caregiver_name
-            FROM visits v
-            LEFT JOIN users u ON u.id = v.caregiver_id
-            WHERE v.patient_id = :id
-            ORDER BY v.visit_date DESC, v.visit_time DESC
-        """),
-        {"id": str(patient_id)},
-    )
-    visits = [dict(r) for r in visits_result.mappings().all()]
+      {/* ── CSV Import Results ── */}
+      {importResult && (
+        <Modal
+          open={!!importResult}
+          onClose={() => setImportResult(null)}
+          title="CSV Import Complete"
+          footer={<ModalFooter><Button variant="primary" onClick={() => setImportResult(null)}>Done</Button></ModalFooter>}
+        >
+          <div className="space-y-3">
+            <div className="flex gap-4">
+              <div className="flex-1 text-center p-3 rounded border border-surface-border bg-forest-ghost">
+                <div className="text-2xl font-bold text-forest">{importResult.created}</div>
+                <div className="text-xs text-ink-3 mt-0.5">Patients created</div>
+              </div>
+              <div className="flex-1 text-center p-3 rounded border border-surface-border bg-bg">
+                <div className="text-2xl font-bold text-ink-2">{importResult.skipped}</div>
+                <div className="text-xs text-ink-3 mt-0.5">Rows skipped</div>
+              </div>
+            </div>
+            {importResult.errors.length > 0 && (
+              <div>
+                <div className="text-xs font-bold text-ink-2 mb-1.5">Skipped rows:</div>
+                <div className="max-h-48 overflow-y-auto space-y-1 text-xs text-ink-3 bg-bg rounded border border-surface-border p-2.5">
+                  {importResult.errors.map((e, i) => <div key={i}>• {e}</div>)}
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-ink-3">
+              Expected CSV columns: first_name, last_name, date_of_birth (YYYY-MM-DD), and optionally
+              gender, phone, email, address_line1, city, state, zip, primary_diagnosis. After importing,
+              visit the Patient Map and click "Geocode Existing Patients" to map their addresses.
+            </p>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
 
-    # Full vitals history
-    vitals_result = await db.execute(
-        text("SELECT * FROM vitals WHERE patient_id = :id ORDER BY recorded_at DESC"),
-        {"id": str(patient_id)},
-    )
-    vitals = [dict(r) for r in vitals_result.mappings().all()]
-
-    # All medications (active and discontinued)
-    meds_result = await db.execute(
-        text("SELECT * FROM medications WHERE patient_id = :id ORDER BY status, drug_name"),
-        {"id": str(patient_id)},
-    )
-    medications = [dict(r) for r in meds_result.mappings().all()]
-
-    # All pharmacy orders (delivery status)
-    pharm_result = await db.execute(
-        text("SELECT * FROM pharmaceutical_orders WHERE patient_id = :id ORDER BY created_at DESC"),
-        {"id": str(patient_id)},
-    )
-    pharm_orders = [dict(r) for r in pharm_result.mappings().all()]
-
-    # All OASIS assessments
-    oasis_result = await db.execute(
-        text("""
-            SELECT oa.*, CONCAT(u.first_name, ' ', u.last_name) AS conducted_by_name
-            FROM oasis_assessments oa
-            LEFT JOIN users u ON u.id = oa.conducted_by
-            WHERE oa.patient_id = :id
-            ORDER BY oa.assessment_date DESC
-        """),
-        {"id": str(patient_id)},
-    )
-    oasis = [dict(r) for r in oasis_result.mappings().all()]
-
-    # All care plans
-    care_plans_result = await db.execute(
-        text("SELECT * FROM care_plans WHERE patient_id = :id ORDER BY start_date DESC"),
-        {"id": str(patient_id)},
-    )
-    care_plans = [dict(r) for r in care_plans_result.mappings().all()]
-
-    # All claims
-    claims_result = await db.execute(
-        text("SELECT * FROM billing_claims WHERE patient_id = :id ORDER BY service_date DESC"),
-        {"id": str(patient_id)},
-    )
-    claims = [dict(r) for r in claims_result.mappings().all()]
-
-    await audit.log(
-        AuditAction.PATIENT_VIEWED,
-        f"Opened full chart: {patient['first_name']} {patient['last_name']}",
-        patient_id=patient_id, resource_type="patient", resource_id=patient_id,
-    )
-
-    return {
-        "data": {
-            "patient":      patient,
-            "visits":       visits,
-            "vitals":       vitals,
-            "medications":  medications,
-            "pharm_orders": pharm_orders,
-            "oasis":        oasis,
-            "care_plans":   care_plans,
-            "claims":       claims,
-        }
-    }
-
-
-@router.get(
-    "/{patient_id}/timeline",
-    dependencies=[
-        Depends(require_permissions(Permission.PATIENTS_VIEW)),
-        # See chart endpoint for rationale — timeline aggregates clinical events
-        Depends(require_any_permission(
-            Permission.VISITS_VIEW,
-            Permission.VITALS_VIEW,
-            Permission.MEDS_VIEW,
-        )),
-    ],
-)
-async def get_patient_timeline(
-    patient_id: UUID,
-    limit: int = Query(100, ge=1, le=500),
-    db: AsyncSession = Depends(get_db_for_tenant),
-):
-    """
-    Returns a chronological history feed for a patient, built from the audit
-    trail — every recorded action (discharge, claim filed, medication
-    delivered, SOAP note, OASIS submitted, etc.) tied to this patient.
-    """
-    result = await db.execute(
-        text("""
-            SELECT action, description, user_name, user_role,
-                   resource_type, created_at, success
-            FROM audit_logs
-            WHERE patient_id = :id
-              AND action NOT IN ('PATIENT_VIEWED', 'VITALS_VIEWED',
-                                 'MEDICATION_VIEWED', 'CARE_PLAN_VIEWED',
-                                 'DOCUMENT_VIEWED', 'INTAKE_FORM_VIEWED')
-            ORDER BY created_at DESC
-            LIMIT :limit
-        """),
-        {"id": str(patient_id), "limit": limit},
-    )
-    events = [dict(r) for r in result.mappings().all()]
-    return {"data": events}
-
-
-@router.get(
-    "/map/locations",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_VIEW))],
-)
-async def get_patient_map_locations(
-    caregiver_id: Optional[UUID] = Query(None, description="Filter to one caregiver's patients"),
-    db: AsyncSession = Depends(get_db_for_tenant),
-):
-    """
-    Returns active patients that have geocoded coordinates, for the map view.
-    Optionally filtered to a single caregiver's assigned patients.
-    """
-    conditions = ["p.deleted_at IS NULL", "p.status = 'active'",
-                  "p.latitude IS NOT NULL", "p.longitude IS NOT NULL"]
-    params = {}
-    if caregiver_id:
-        conditions.append("p.assigned_caregiver = :cg")
-        params["cg"] = str(caregiver_id)
-
-    result = await db.execute(
-        text(f"""
-            SELECT p.id, p.first_name, p.last_name, p.latitude, p.longitude,
-                   p.address_line1, p.city, p.state, p.zip,
-                   p.primary_diagnosis, p.phone,
-                   CONCAT(c.first_name, ' ', c.last_name) AS caregiver_name
-            FROM patients p
-            LEFT JOIN users c ON c.id = p.assigned_caregiver
-            WHERE {' AND '.join(conditions)}
-            ORDER BY p.last_name
-        """),
-        params,
-    )
-    # Decrypt: this SELECT pulls address_line1, phone, latitude and longitude.
-    # dec_float() casts the coordinates back to real numbers, which is what
-    # the Leaflet map on the frontend expects — it does `p.latitude != null`
-    # and passes them straight into L.marker([lat, lng]).
-    return {"data": decrypt_patient_rows(result.mappings().all())}
-
-
-@router.post(
-    "/map/backfill-geocode",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_EDIT))],
-)
-async def backfill_geocode(
-    db: AsyncSession = Depends(get_db_for_tenant),
-):
-    """
-    One-time helper: geocode any active patients that have an address but no
-    coordinates yet. Safe to run repeatedly; only fills in what's missing.
-    """
-    from app.core.geocoding import build_address_string, geocode_address, is_geocoding_configured
-    if not is_geocoding_configured():
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "geocoding_not_configured",
-                    "message": "Add AZURE_MAPS_KEY to enable geocoding."},
-        )
-
-    result = await db.execute(
-        text("""
-            SELECT id, address_line1, city, state, zip
-            FROM patients
-            WHERE deleted_at IS NULL AND status = 'active'
-              AND (latitude IS NULL OR longitude IS NULL)
-              AND address_line1 IS NOT NULL
-            LIMIT 200
-        """),
-    )
-    # The `address_line1 IS NOT NULL` and `latitude IS NULL` predicates in the
-    # query above still work correctly against encrypted TEXT columns — NULL
-    # is NULL regardless of encryption, which is exactly why this filter did
-    # not need to change.
-    rows = result.mappings().all()
-    updated = 0
-    for r in rows:
-        row = decrypt_patient_row(r)   # address_line1 is ciphertext on disk
-        addr = build_address_string(row["address_line1"], row["city"], row["state"], row["zip"])
-        coords = await geocode_address(addr)
-        if coords:
-            await db.execute(
-                text("UPDATE patients SET latitude = :lat, longitude = :lon WHERE id = :id"),
-                {"lat": enc_float(coords[0]), "lon": enc_float(coords[1]),
-                 "id": str(row["id"])},
-            )
-            updated += 1
-
-    return {"data": {"checked": len(rows), "geocoded": updated},
-            "message": f"Geocoded {updated} of {len(rows)} patients."}
-
-
-@router.post(
-    "/import-csv",
-    dependencies=[Depends(require_permissions(Permission.PATIENTS_CREATE))],
-)
-async def import_patients_csv(
-    file: UploadFile = File(...),
-    current_user: TokenPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db_for_tenant),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Bulk-create patients from an uploaded CSV. Expected headers (case-insensitive,
-    flexible): first_name, last_name, date_of_birth, gender, phone, email,
-    address_line1, city, state, zip, primary_diagnosis.
-    Required per row: first_name, last_name, date_of_birth (YYYY-MM-DD).
-    Geocoding is skipped here for speed — run the map backfill afterward.
-    """
-    import csv
-    import io
-
-    raw = await file.read()
-    try:
-        text_data = raw.decode("utf-8-sig")  # handle Excel BOM
-    except UnicodeDecodeError:
-        text_data = raw.decode("latin-1")
-
-    reader = csv.DictReader(io.StringIO(text_data))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=400, detail={"error": "empty_csv",
-                            "message": "The CSV appears to be empty or has no header row."})
-
-    # Normalize header names → canonical keys
-    def norm(s: str) -> str:
-        return (s or "").strip().lower().replace(" ", "_")
-
-    valid_genders = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
-    valid_blood = {"a+","a-","b+","b-","ab+","ab-","o+","o-","unknown"}
-
-    created, errors = 0, []
-    row_num = 1
-    for row in reader:
-        row_num += 1
-        r = {norm(k): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
-        first = r.get("first_name") or r.get("firstname") or r.get("first")
-        last = r.get("last_name") or r.get("lastname") or r.get("last")
-        dob = r.get("date_of_birth") or r.get("dob") or r.get("birthdate")
-
-        if not (first and last and dob):
-            errors.append(f"Row {row_num}: missing required first_name, last_name, or date_of_birth")
-            continue
-
-        # Validate date
-        try:
-            dob_val = datetime.strptime(dob, "%Y-%m-%d").date()
-        except ValueError:
-            errors.append(f"Row {row_num}: date_of_birth '{dob}' must be YYYY-MM-DD")
-            continue
-
-        gender = norm(r.get("gender") or "")
-        gender = gender if gender in valid_genders else None
-        blood = (r.get("blood_type") or "").strip().lower()
-        blood = blood if blood in valid_blood else None
-
-        # Bulk import is a WRITE PATH and must encrypt exactly like the
-        # single-record create does. If it did not, every CSV-imported
-        # patient would sit in the database with a plaintext phone, email and
-        # street address while the rest of the table was encrypted — the
-        # encryption would be quietly bypassed at the highest-volume entry
-        # point in the product. Column-name-keyed params, same as create.
-        row_params = encrypt_patient_fields({
-            "organization_id":   str(current_user.organization_id),
-            "first_name":        first,
-            "last_name":         last,
-            "date_of_birth":     dob_val,
-            "gender":            gender,
-            "city":              r.get("city") or None,
-            "state":             r.get("state") or None,
-            "zip":               r.get("zip") or r.get("zip_code") or r.get("postal_code") or None,
-            "blood_type":        blood,
-            "primary_diagnosis": r.get("primary_diagnosis") or r.get("diagnosis") or None,
-            # ── encrypted ───────────────────────────────────────────
-            "phone":             r.get("phone") or None,
-            "email":             r.get("email") or None,
-            "address_line1":     r.get("address_line1") or r.get("address") or None,
-        })
-
-        try:
-            await db.execute(
-                text("""
-                    INSERT INTO patients (
-                        organization_id, first_name, last_name, date_of_birth,
-                        gender, phone, email, address_line1, city, state, zip,
-                        blood_type, primary_diagnosis, status
-                    ) VALUES (
-                        :organization_id, :first_name, :last_name, :date_of_birth,
-                        :gender, :phone, :email, :address_line1, :city, :state, :zip,
-                        :blood_type, :primary_diagnosis, 'active'
-                    )
-                """),
-                row_params,
-            )
-            created += 1
-        except Exception as e:
-            errors.append(f"Row {row_num}: {str(e)[:120]}")
-
-    await audit.log(
-        AuditAction.PATIENT_CREATED,
-        f"Imported {created} patient(s) from CSV ({len(errors)} skipped)",
-        resource_type="patient",
-    )
-    return {
-        "data": {"created": created, "skipped": len(errors), "errors": errors[:25]},
-        "message": f"Imported {created} patient(s). {len(errors)} row(s) skipped.",
-    }
+// Import used in detail panel
+import { fmtTime, VISIT_TYPE_LABEL as VTL } from '@/utils';
+const VISIT_TYPE_LABEL = VTL;
