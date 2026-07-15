@@ -37,6 +37,43 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
 
 
 # ── Schemas ────────────────────────────────────────────────────
+
+# Normalizers applied at the API boundary so that near-miss values from any
+# client (a form sending "Non-binary", a script sending "MALE") are coerced to
+# the exact tokens the database CHECK constraints require. This mirrors the
+# normalization the CSV importer already does, closing the gap where the
+# single-record create/update path had none — the same "normalize at every
+# entry point" lesson that bit us on enum casing before.
+
+_VALID_GENDERS = {"male", "female", "non_binary", "other", "prefer_not_to_say"}
+_VALID_BLOOD = {"a+", "a-", "b+", "b-", "ab+", "ab-", "o+", "o-", "unknown"}
+
+
+def _normalize_gender_value(v):
+    """Coerce a gender string to the DB's allowed token, or leave it for the
+    DB to reject if it's genuinely not a recognized value."""
+    if v is None:
+        return None
+    s = str(v).strip().lower().replace("-", "_").replace(" ", "_")
+    if not s:
+        return None
+    return s if s in _VALID_GENDERS else s  # pass through; DB constraint is final arbiter
+
+
+def _normalize_blood_value(v):
+    """Coerce a blood type to the DB's notation: uppercase letters (A+, O-,
+    AB+), with the sole exception of 'unknown', which the constraint stores
+    lowercase. Checked against the real schema.sql CHECK constraint."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    if s.lower() == "unknown":
+        return "unknown"
+    return s.upper()
+
+
 class PatientCreate(BaseModel):
     first_name: str
     last_name: str
@@ -62,6 +99,16 @@ class PatientCreate(BaseModel):
     assigned_pharmacy_staff: Optional[UUID] = None
     fall_risk: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator("gender", mode="before")
+    @classmethod
+    def _normalize_gender(cls, v):
+        return _normalize_gender_value(v)
+
+    @field_validator("blood_type", mode="before")
+    @classmethod
+    def _normalize_blood(cls, v):
+        return _normalize_blood_value(v)
 
 
 class PatientUpdate(BaseModel):
@@ -90,6 +137,16 @@ class PatientUpdate(BaseModel):
     fall_risk: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator("gender", mode="before")
+    @classmethod
+    def _normalize_gender(cls, v):
+        return _normalize_gender_value(v)
+
+    @field_validator("blood_type", mode="before")
+    @classmethod
+    def _normalize_blood(cls, v):
+        return _normalize_blood_value(v)
 
 
 # ── List Patients ─────────────────────────────────────────────
