@@ -67,12 +67,13 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import text as _text
         from app.database import engine as _engine
         async with _engine.begin() as conn:
-            await conn.execute(_text(
-                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"
-            ))
-            await conn.execute(_text(
-                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION"
-            ))
+            # NOTE: patients.latitude / patients.longitude used to be created
+            # here as DOUBLE PRECISION. They are now ENCRYPTED TEXT columns
+            # owned by Alembic migration 0007. Re-adding them here would be a
+            # landmine: on a database built fresh from schema.sql, this startup
+            # hook could win the race and recreate them as DOUBLE PRECISION,
+            # which would then reject ciphertext on the first write. Alembic
+            # owns those two columns now. Do not re-add them here.
             await conn.execute(_text(
                 "ALTER TABLE visits ADD COLUMN IF NOT EXISTS overdue_alerted BOOLEAN DEFAULT FALSE"
             ))
