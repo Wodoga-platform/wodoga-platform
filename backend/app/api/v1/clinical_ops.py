@@ -29,6 +29,7 @@ from app.api.v1.clinical_schemas import (
     StaffInviteRequest,
 )
 from app.core.permissions import Permission, TokenPayload, require_permissions
+from app.core.phi_crypto import encrypt_patient_fields
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
 
 
@@ -665,24 +666,42 @@ async def advance_referral(
 
     if next_stage == "admitted":
         # Auto-create the patient record
+        # THIS IS A PATIENT WRITE PATH. It creates a real patient record from
+        # a referral, so it must encrypt PHI exactly like POST /patients does.
+        # Without this, every patient admitted via the referral pipeline would
+        # land in the database with a plaintext phone, email and insurance
+        # record while the rest of the table was encrypted — silently
+        # bypassing encryption for an entire admission route.
+        #
+        # NOTE: the `referrals` table itself still stores phone/email/notes/
+        # insurance in plaintext. That is a separate gap, tracked separately —
+        # referral data is PHI too, and encrypting it is a follow-up task.
+        patient_params = encrypt_patient_fields({
+            "organization_id":   str(current_user.organization_id),
+            "first_name":        ref["first_name"],
+            "last_name":         ref["last_name"],
+            "date_of_birth":     _to_date(ref["date_of_birth"]) or date(1900, 1, 1),
+            # ── encrypted ───────────────────────────────────────────
+            "phone":             ref["phone"],
+            "email":             ref["email"],
+            # enc_json() serialises the dict itself — no json.dumps() needed.
+            "insurance_primary": {
+                "provider":  ref["insurance_provider"] or "",
+                "member_id": ref["insurance_id"] or "",
+            },
+            "notes":             f"Admitted via referral from {ref['referral_source'] or 'unknown'}",
+        })
         patient_result = await db.execute(
             text("""
                 INSERT INTO patients (
                     organization_id, first_name, last_name, date_of_birth,
                     phone, email, insurance_primary, notes, status
                 ) VALUES (
-                    :org, :fn, :ln, :dob, :phone, :email,
-                    :insurance, :notes, 'active'
+                    :organization_id, :first_name, :last_name, :date_of_birth,
+                    :phone, :email, :insurance_primary, :notes, 'active'
                 ) RETURNING id
             """),
-            {
-                "org": str(current_user.organization_id),
-                "fn": ref["first_name"], "ln": ref["last_name"],
-                "dob": _to_date(ref["date_of_birth"]) or date(1900, 1, 1),
-                "phone": ref["phone"], "email": ref["email"],
-                "insurance": json.dumps({"provider": ref["insurance_provider"] or "", "member_id": ref["insurance_id"] or ""}),
-                "notes": f"Admitted via referral from {ref['referral_source'] or 'unknown'}",
-            },
+            patient_params,
         )
         new_patient = patient_result.mappings().first()
         update_params["converted_patient_id"] = str(new_patient["id"])
