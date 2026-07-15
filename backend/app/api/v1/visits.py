@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, AuditLogger
+from app.core.phi_crypto import dec_list, dec_scalar
 from app.core.permissions import Permission, TokenPayload, require_permissions
 from app.dependencies import (
     get_audit_logger,
@@ -240,7 +241,16 @@ async def get_overdue_visits(
         """),
         {"org": str(current_user.organization_id)},
     )
-    return {"data": [dict(r) for r in result.mappings().all()]}
+    # This JOIN pulls p.phone from the patients table, which is encrypted.
+    # Decrypt ONLY that column — a whole-row decrypt would be wrong here,
+    # because `visits` has its own `notes` column that collides by name with
+    # `patients.notes` and must not be touched.
+    rows = []
+    for r in result.mappings().all():
+        row = dict(r)
+        row["phone"] = dec_scalar(row.get("phone"))
+        rows.append(row)
+    return {"data": rows}
 
 
 # ── Get Single Visit ───────────────────────────────────────────
@@ -280,7 +290,14 @@ async def get_visit(
         resource_type="visit",
         resource_id=visit_id,
     )
-    return {"data": dict(visit)}
+    # p.allergies comes from the encrypted patients table — the caregiver sees
+    # this at the bedside, so it must be a real list, not ciphertext. Decrypt
+    # ONLY that column: a whole-row decrypt would be wrong here, because
+    # `visits` has its own `notes` column that collides by name with
+    # `patients.notes` and must be left alone.
+    visit_data = dict(visit)
+    visit_data["allergies"] = dec_list(visit_data.get("allergies"))
+    return {"data": visit_data}
 
 
 # ── Schedule Visit ─────────────────────────────────────────────
