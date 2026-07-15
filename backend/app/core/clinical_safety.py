@@ -44,6 +44,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.phi_crypto import PHIDecryptionError, decrypt_allergies_strict
+
 
 class AlertSeverity(str, Enum):
     CRITICAL = "critical"   # do not proceed without explicit override + reason
@@ -56,6 +58,7 @@ class AlertType(str, Enum):
     ALLERGY = "allergy"
     INTERACTION = "interaction"
     DUPLICATE = "duplicate_therapy"
+    UNVERIFIABLE = "unverifiable"   # we could not READ the allergy data at all
 
 
 @dataclass
@@ -77,15 +80,42 @@ class SafetyAlert:
 
 def _normalize_tokens(raw) -> list[str]:
     """
-    Turn an allergies value (Postgres TEXT[] → Python list, or a stray
-    string) into a clean list of lowercased, stripped tokens.
+    Turn a DECRYPTED allergies value into a clean list of lowercased,
+    stripped tokens.
+
+    IMPORTANT — READ BEFORE CHANGING:
+    This function must only ever be handed data that has ALREADY been
+    decrypted by phi_crypto.decrypt_allergies_strict(). It must never be
+    pointed straight at the raw `allergies` column.
+
+    Why this matters: the `allergies` column is now ciphertext. The old
+    version of this function had a "defensive" branch that coerced any
+    non-list into a string and split it on commas. Handed a ciphertext blob,
+    that branch would NOT crash — it would happily return
+    ['enc:v1:gaaaaab...'] as a single allergy token, match nothing against
+    the drug name, and report zero alerts for a patient who is in fact
+    allergic. A silent fail-open on the one code path in this system that
+    can contribute to killing someone.
+
+    So the string branch is gone, and a ciphertext value now raises rather
+    than being quietly mangled into a token.
     """
     if raw is None:
         return []
+
+    if isinstance(raw, str) and raw.startswith("enc:v1:"):
+        raise PHIDecryptionError(
+            "clinical_safety._normalize_tokens received RAW CIPHERTEXT. "
+            "Allergies must be decrypted with decrypt_allergies_strict() "
+            "before they reach the safety check. Refusing to run an allergy "
+            "check against encrypted data."
+        )
+
     if isinstance(raw, (list, tuple)):
         items = list(raw)
     else:
-        # Defensive: a single string with separators
+        # A bare string that is NOT ciphertext — legacy plaintext such as
+        # "Penicillin, Sulfa". Split it, as before.
         items = str(raw).replace(";", ",").split(",")
     out = []
     for item in items:
@@ -146,8 +176,53 @@ async def check_prescription_safety(
         {"id": str(patient_id)},
     )).mappings().first()
 
+    if not patient:
+        # No patient row → we cannot check allergies at all. Same reasoning
+        # as the decryption failure below: silence here would read as "safe."
+        return [SafetyAlert(
+            severity=AlertSeverity.CRITICAL,
+            type=AlertType.UNVERIFIABLE,
+            message=(
+                "The patient record could not be loaded, so this prescription "
+                "has NOT been checked against their allergies. Do not proceed "
+                "until the record is available."
+            ),
+            trigger=None,
+        )]
+
     if patient:
-        allergy_tokens = _normalize_tokens(patient["allergies"])
+        # ── Decrypt, and FAIL CLOSED if we cannot ────────────────────
+        # The `allergies` column is encrypted at rest. If we cannot read it
+        # — wrong key, rotated key, corrupted value — we must NOT fall
+        # through to "no alerts found." Returning an empty alert list here
+        # would tell the prescriber the drug is safe when the truth is that
+        # we never checked. That is the fatal-error path this whole module
+        # exists to close.
+        #
+        # So instead we emit a CRITICAL alert. Because has_blocking_alerts()
+        # treats CRITICAL as blocking, the prescription is halted and the
+        # prescriber is told plainly that allergy data could not be read.
+        #
+        # A blocked prescription is an inconvenience someone can escalate.
+        # A missed allergy is not recoverable. Fail closed.
+        try:
+            decrypted_allergies = decrypt_allergies_strict(patient["allergies"])
+        except PHIDecryptionError:
+            return [SafetyAlert(
+                severity=AlertSeverity.CRITICAL,
+                type=AlertType.UNVERIFIABLE,
+                message=(
+                    "ALLERGY DATA COULD NOT BE READ for this patient, so this "
+                    "prescription has NOT been checked against their allergies. "
+                    "This is a system fault, not a clinical finding — it does "
+                    "not mean the patient has no allergies. Do not proceed on "
+                    "the assumption that this drug is safe. Verify allergies "
+                    "against another source and contact your administrator."
+                ),
+                trigger=None,
+            )]
+
+        allergy_tokens = _normalize_tokens(decrypted_allergies)
         for tok in allergy_tokens:
             # Direct match: the allergy token appears in the drug string
             if tok and tok in haystack:
