@@ -379,6 +379,42 @@ def decrypt_patient_rows(rows: Iterable[Any]) -> list[dict]:
     return [decrypt_patient_row(r) for r in rows]
 
 
+# ── Audit-log state blobs ────────────────────────────────────────────
+# The audit log stores before/after snapshots of records in its
+# `previous_state` / `new_state` columns as JSON strings. Those snapshots
+# contain patient PHI (a patient update logs the whole changed row), so the
+# audit trail must be encrypted at rest exactly like the patients table it
+# describes — otherwise an attacker who gets a DB dump simply reads the PHI
+# out of the audit log instead of the (now encrypted) patients table.
+#
+# These are named separately from enc_scalar/dec_scalar purely so the audit
+# path is greppable and self-explanatory. The audit logger already
+# json.dumps() the blob before it gets here, so we treat it as a scalar
+# string: encrypt the whole serialised blob as one tagged value.
+
+def encrypt_audit_state(json_blob: Optional[str]) -> Optional[str]:
+    """Encrypt a serialised audit state blob (a JSON string) for storage."""
+    if json_blob is None:
+        return None
+    return _encrypt_str(json_blob)
+
+
+def decrypt_audit_state(value: Optional[str]) -> Optional[str]:
+    """
+    Decrypt an audit state blob back to its JSON string.
+
+    Untagged legacy rows — audit entries written before this encryption
+    existed — pass straight through as plaintext, so the audit viewer keeps
+    working across the mixed-state boundary. Unlike the allergy path, a
+    decrypt failure here is NOT life-safety critical, but we still let it
+    raise rather than silently return ciphertext, so a key problem surfaces
+    loudly instead of showing an admin an unreadable blob as if it were data.
+    """
+    if value is None:
+        return None
+    return _decrypt_str(value)
+
+
 # ── The life-safety accessor ─────────────────────────────────────────
 
 def decrypt_allergies_strict(value: Any) -> list[str]:
