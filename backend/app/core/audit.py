@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.phi_crypto import encrypt_audit_state, decrypt_audit_state
+
 
 class AuditAction:
     LOGIN_SUCCESS           = "LOGIN_SUCCESS"
@@ -128,8 +130,18 @@ class AuditLogger:
                     "ip_address":     ip_address,
                     "user_agent":     user_agent,
                     "request_id":     request_id,
-                    "previous_state": json.dumps(previous_state) if previous_state else None,
-                    "new_state":      json.dumps(new_state) if new_state else None,
+                    # Encrypt the before/after snapshots. These blobs contain
+                    # patient PHI (a patient update logs the whole changed row),
+                    # so they must be encrypted at rest like the patients table
+                    # itself — otherwise the audit log is an unencrypted copy of
+                    # the very data we encrypted. Encrypting here, at the single
+                    # write choke point, covers every call site at once.
+                    "previous_state": encrypt_audit_state(
+                        json.dumps(previous_state, default=str) if previous_state else None
+                    ),
+                    "new_state":      encrypt_audit_state(
+                        json.dumps(new_state, default=str) if new_state else None
+                    ),
                     "success":        success,
                     "error_message":  error_message,
                 },
