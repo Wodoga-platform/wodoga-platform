@@ -548,14 +548,11 @@ async def update_patient(
         patient_id=patient_id,
         resource_type="patient",
         resource_id=patient_id,
-        # `existing` is already a plain dict (decrypted above).
-        # KNOWN GAP (pre-existing, not introduced here): the audit log stores
-        # previous_state/new_state as plaintext, so PHI values land unencrypted
-        # in `audit_logs` even though `patients` is now encrypted. That is a
-        # real hole in the encryption story and needs its own pass — either
-        # encrypt these JSON blobs or store only the field NAMES that changed
-        # rather than their values. Tracked separately; not fixed here because
-        # it touches every audit call site, not just this one.
+        # `existing` is already a plain dict (decrypted above). These PHI
+        # snapshots are encrypted at rest by AuditLogger.log() before insert
+        # (see app/core/audit.py) and decrypted by the audit viewer on read,
+        # so passing decrypted values here is correct — the encryption happens
+        # at the single audit write choke point, not at each call site.
         previous_state=existing,
         new_state=updates,
     )
