@@ -22,6 +22,12 @@ export default function MedicationsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [recoPatient, setRecoPatient] = useState('');
   const [recoResult, setRecoResult] = useState<any>(null);
+  // Patient scope for the Active Medications table. Empty string = no patient
+  // selected yet. We deliberately do NOT default to "all patients": showing
+  // every patient's medications in one list is both unusable at scale and a
+  // minimum-necessary concern (a provider viewing one patient shouldn't see
+  // everyone else's meds). The clinician picks a patient, same as reconciliation.
+  const [medsPatient, setMedsPatient] = useState('');
   const { register, handleSubmit, reset, getValues } = useForm();
 
   // Clinical safety alert state. When the backend blocks a prescription with
@@ -32,9 +38,14 @@ export default function MedicationsPage() {
   const [overrideReason, setOverrideReason] = useState('');
   const [reasonError, setReasonError] = useState('');
 
+  // Only fetch medications once a patient is selected, and scope the query to
+  // that patient. The backend already supports the patient_id filter; the UI
+  // simply never passed it before. `enabled` keeps us from pulling the whole
+  // org's medication list on first render.
   const { data: meds = [], isLoading } = useQuery({
-    queryKey: ['medications'],
-    queryFn:  () => medicationService.list(),
+    queryKey: ['medications', medsPatient],
+    queryFn:  () => medicationService.list({ patient_id: medsPatient }),
+    enabled:  !!medsPatient,
   });
 
   const { data: patients } = useQuery({
@@ -109,17 +120,30 @@ export default function MedicationsPage() {
         </Gated>
       </div>
 
-      {lowRefills.length > 0 && (
+      {medsPatient && lowRefills.length > 0 && (
         <Alert type="warning" className="mb-4">
-          {lowRefills.length} medication(s) low on refills — review needed.
+          {lowRefills.length} of this patient's medication(s) low on refills — review needed.
         </Alert>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         <div className="col-span-2 card">
-          <div className="card-header"><div className="text-sm font-bold">Active Medications</div></div>
-          {isLoading ? <PageLoader /> : meds.length === 0 ? (
-            <EmptyState icon={Pill} title="No medications" description="Prescribed medications will appear here." />
+          <div className="card-header flex items-center justify-between gap-3">
+            <div className="text-sm font-bold">Active Medications</div>
+            <select
+              className="form-select py-1.5 text-xs w-56"
+              value={medsPatient}
+              onChange={(e) => setMedsPatient(e.target.value)}
+              aria-label="Select patient to view medications"
+            >
+              <option value="">Select a patient…</option>
+              {patients?.data.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
+            </select>
+          </div>
+          {!medsPatient ? (
+            <EmptyState icon={Pill} title="Select a patient" description="Choose a patient to view their active medications." />
+          ) : isLoading ? <PageLoader /> : meds.length === 0 ? (
+            <EmptyState icon={Pill} title="No medications" description="This patient has no active medications." />
           ) : (
             <table className="data-table">
               <thead><tr><th>Drug</th><th>Dosage</th><th>Frequency</th><th>Refills</th><th>Prescriber</th></tr></thead>
