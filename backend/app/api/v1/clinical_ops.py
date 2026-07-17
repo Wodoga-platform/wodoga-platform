@@ -29,7 +29,7 @@ from app.api.v1.clinical_schemas import (
     StaffInviteRequest,
 )
 from app.core.permissions import Permission, TokenPayload, require_permissions
-from app.core.phi_crypto import encrypt_patient_fields
+from app.core.phi_crypto import encrypt_patient_fields, decrypt_audit_state
 from app.dependencies import get_audit_logger, get_current_user_payload, get_db_for_tenant
 
 
@@ -1592,6 +1592,15 @@ async def list_audit_logs(
     items = [dict(r) for r in rows]
     for i in items:
         i.pop("total_count", None)
+        # Decrypt the before/after snapshots so the admin viewer shows the real
+        # diff. Legacy plaintext rows (written before audit encryption) pass
+        # through untouched. Admins reaching this endpoint are already
+        # authorized to view patient data, so decrypting here is not a
+        # disclosure — it just restores what the column used to show.
+        if i.get("previous_state") is not None:
+            i["previous_state"] = decrypt_audit_state(i["previous_state"])
+        if i.get("new_state") is not None:
+            i["new_state"] = decrypt_audit_state(i["new_state"])
 
     await audit.log(
         AuditAction.AUDIT_LOG_VIEWED,
