@@ -542,18 +542,26 @@ async def update_patient(
                  "id": str(patient_id)},
             )
 
+    # Build a symmetric per-field diff for the audit log. `new_state` is the
+    # set of changed fields (the PATCH body). `previous_state` must be the OLD
+    # values of exactly those same fields — not the entire prior row — so the
+    # audit viewer shows a clean "field: old -> new" for each change instead of
+    # "here is the whole old record, now go find the differences yourself."
+    # Only keys present in `updates` are captured, pulled from the decrypted
+    # `existing` row.
+    changed_before = {k: existing.get(k) for k in updates.keys() if k in existing}
+
     await audit.log(
         AuditAction.PATIENT_UPDATED,
         f"Updated patient: {existing['first_name']} {existing['last_name']}",
         patient_id=patient_id,
         resource_type="patient",
         resource_id=patient_id,
-        # `existing` is already a plain dict (decrypted above). These PHI
-        # snapshots are encrypted at rest by AuditLogger.log() before insert
-        # (see app/core/audit.py) and decrypted by the audit viewer on read,
-        # so passing decrypted values here is correct — the encryption happens
-        # at the single audit write choke point, not at each call site.
-        previous_state=existing,
+        # Symmetric diff: previous_state and new_state hold the SAME keys — the
+        # fields that changed — with old vs new values. Both are encrypted at
+        # rest by AuditLogger.log() before insert and decrypted by the viewer
+        # on read.
+        previous_state=changed_before,
         new_state=updates,
     )
 
