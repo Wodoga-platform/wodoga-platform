@@ -1,0 +1,107 @@
+name: Tests
+
+# WHAT THIS IS (plain English):
+# This runs your entire test suite automatically in the cloud every time you
+# push to GitHub. You never touch a terminal. The result shows up as a green
+# check or red X next to your commit, and the full report lives in the repo's
+# "Actions" tab.
+#
+# Unlike running tests on Railway or in a bare sandbox, this gives the tests a
+# REAL Postgres (with the uuid-ossp / pgcrypto / citext extensions your schema
+# needs), so the tenant-isolation and access-control LEAK tests actually run —
+# not just the logic tests. A green check here means the full system passed,
+# leak checks included.
+
+on:
+  push:
+    branches: ['**']          # every branch
+  pull_request:
+    branches: ['**']
+
+jobs:
+  test:
+    name: Backend test suite
+    runs-on: ubuntu-latest
+
+    # GitHub starts a real Postgres 16 container alongside the job. This is the
+    # database the leak tests run against. It is thrown away when the job ends,
+    # so nothing here ever touches your real Railway data.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # Named 'wodoga' (not 'wodoga_test') because schema.sql contains
+          # hardcoded `GRANT CONNECT ON DATABASE wodoga` statements. Matching
+          # the name here lets the schema load unchanged.
+          POSTGRES_DB: wodoga
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/wodoga
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/wodoga
+      ENCRYPTION_KEY: 7kK4bu9hMNjgE1xZggs5N_qsz97JHRUo5oyb_NXhgiA=
+      JWT_SECRET_KEY: ci_test_jwt_secret_key_not_used_in_production
+      SECRET_KEY: ci_test_secret_key_not_used_in_production_00
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # pgserver is used by the self-contained DB round-trip test. It is a
+          # test-only tool, not in requirements.txt, so install it here.
+          pip install pgserver
+
+      - name: Load schema, migrations, and seed into the test database
+        working-directory: backend
+        env:
+          PGPASSWORD: postgres
+        run: |
+          PSQL="psql -h localhost -U postgres -d wodoga -v ON_ERROR_STOP=1"
+
+          echo "Loading schema.sql…"
+          $PSQL -f ../database/schema.sql
+
+          echo "Applying migration 0007 + 0008 type changes (they postdate schema.sql)…"
+          $PSQL <<'SQL'
+          ALTER TABLE patients ALTER COLUMN allergies TYPE TEXT USING allergies::text;
+          ALTER TABLE patients ALTER COLUMN secondary_diagnoses TYPE TEXT USING secondary_diagnoses::text;
+          ALTER TABLE patients ALTER COLUMN emergency_contact TYPE TEXT USING emergency_contact::text;
+          ALTER TABLE patients ALTER COLUMN insurance_primary TYPE TEXT USING insurance_primary::text;
+          ALTER TABLE patients ALTER COLUMN insurance_secondary TYPE TEXT USING insurance_secondary::text;
+          ALTER TABLE patients ALTER COLUMN email TYPE TEXT USING email::text;
+          ALTER TABLE patients ADD COLUMN IF NOT EXISTS latitude TEXT;
+          ALTER TABLE patients ADD COLUMN IF NOT EXISTS longitude TEXT;
+          ALTER TABLE audit_logs ALTER COLUMN previous_state TYPE TEXT USING previous_state::text;
+          ALTER TABLE audit_logs ALTER COLUMN new_state TYPE TEXT USING new_state::text;
+          SQL
+
+          echo "Loading seed.sql (roles, etc.)…"
+          $PSQL -f ../database/seed.sql
+
+          echo "Database ready."
+
+      - name: Run the full test suite
+        working-directory: backend
+        run: |
+          # -v shows each test name; the whole run (logic + DB leak tests)
+          # reports here and its pass/fail becomes the commit's check status.
+          python -m pytest -v --no-header
