@@ -21,6 +21,7 @@ from app.core.exceptions import WodogaException, to_http_exception
 
 # All API routers
 from app.api.v1 import auth, patients, visits, vitals, eligibility, portal, documents
+from app.api.v1.clinical import clinical_router
 from app.api.v1.clinical_ops import (
     medications_router, care_plans_router, referrals_router,
     billing_router, pharm_router, oasis_router,
@@ -209,6 +210,7 @@ app.include_router(staff_router,              prefix=V1)
 app.include_router(audit_router,              prefix=V1)
 app.include_router(portal.router,             prefix=V1)
 app.include_router(documents.router,          prefix=V1)
+app.include_router(clinical_router,           prefix=V1)
 
 @app.get("/health", include_in_schema=False)
 async def health_check():
