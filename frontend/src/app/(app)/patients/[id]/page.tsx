@@ -11,6 +11,8 @@ import { Activity, AlertTriangle, ArrowLeft, ClipboardList, Clock, Copy, CreditC
 import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField, Gated } from '@/components/ui';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, documentService, vitalsService, visitService, staffService, portalService } from '@/services';
+import { PatientClinicalHeader } from '@/components/clinical/PatientClinicalHeader';
+import { IcdDiagnoses } from '@/components/clinical/IcdDiagnoses';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   fmtDate, fmtTime, fmtDateTime, fmtRelative, fmtCurrency, calcAge,
@@ -306,6 +308,7 @@ export default function PatientChartPage() {
                 {p.primary_diagnosis && (
                   <div className="text-sm font-medium text-forest mt-1.5">{p.primary_diagnosis}</div>
                 )}
+                <div className="mt-2"><PatientClinicalHeader patientId={p.id} codeStatus={p.code_status} payerType={p.payer_type} /></div>
               </div>
             </div>
             <div className="text-right text-xs text-ink-3 space-y-1">
@@ -355,6 +358,12 @@ export default function PatientChartPage() {
               {p.pharmacy_staff_name?.trim() && <span><span className="font-semibold text-ink-2">Pharmacy:</span> {p.pharmacy_staff_name}</span>}
             </div>
           )}
+        </div>
+
+        {/* Diagnoses (ICD-10) */}
+        <div className="p-5 border-b border-surface-border">
+          <div className="section-title">Diagnoses (ICD-10)</div>
+          <IcdDiagnoses patientId={p.id} />
         </div>
 
         {/* Tabs */}
