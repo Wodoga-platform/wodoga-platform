@@ -14,6 +14,7 @@ import {
   StatCard, Badge, Avatar, Alert, EmptyState, PageLoader, Button,
 } from '@/components/ui';
 import { fmtTime, fmtDate, VISIT_TYPE_LABEL, cn } from '@/utils';
+import { AlertsPanel } from '@/components/clinical/AlertsPanel';
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -129,7 +130,15 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
-
+      {/* ── Clinical Alerts ── */}
+      <div className="card mb-5">
+        <div className="card-header">
+          <strong className="text-sm text-ink">Clinical Alerts</strong>
+        </div>
+        <div className="card-body">
+          <AlertsPanel />
+        </div>
+      </div>
       {/* ── Alert Banner ── */}
       {overdueVisits && overdueVisits.length > 0 && (
         <div className="card mb-5 border-l-4" style={{ borderLeftColor: 'var(--red, #b91c1c)' }}>
