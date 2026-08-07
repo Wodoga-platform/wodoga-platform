@@ -130,6 +130,8 @@ export interface Patient {
   zip:                 string | null;
   blood_type:          BloodType | null;
   primary_diagnosis:   string | null;
+  code_status:         string | null;
+  payer_type:          string | null;
   secondary_diagnoses: string[];
   allergies:           string[];
   medical_history:     string | null;
