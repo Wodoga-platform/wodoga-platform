@@ -12,7 +12,7 @@ import { Button, Badge, Avatar, PageLoader, EmptyState, InfoField, Gated } from 
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { patientService, documentService, vitalsService, visitService, staffService, portalService } from '@/services';
 import { PatientClinicalHeader } from '@/components/clinical/PatientClinicalHeader';
-import { IcdDiagnoses } from '@/components/clinical/IcdDiagnoses';
+import { Facesheet } from '@/components/clinical/Facesheet';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   fmtDate, fmtTime, fmtDateTime, fmtRelative, fmtCurrency, calcAge,
@@ -20,7 +20,7 @@ import {
   PATIENT_STATUS_BADGE, cn,
 } from '@/utils';
 
-type Tab = 'timeline' | 'visits' | 'vitals' | 'meds' | 'oasis' | 'claims' | 'documents';
+type Tab = 'facesheet' | 'timeline' | 'visits' | 'vitals' | 'meds' | 'oasis' | 'claims' | 'documents';
 
 const VISIT_STATUS_BADGE: Record<string, any> = {
   scheduled: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'gray', missed: 'red',
@@ -83,7 +83,7 @@ export default function PatientChartPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
-  const [tab, setTab] = useState<Tab>('timeline');
+  const [tab, setTab] = useState<Tab>('facesheet');
 
   const { data: chart, isLoading } = useQuery({
     queryKey: ['patient-chart', id],
@@ -272,6 +272,7 @@ export default function PatientChartPage() {
     || { label: p.status, variant: 'gray' as const };
 
   const TABS: { key: Tab; label: string; count?: number }[] = [
+    { key: 'facesheet', label: 'Facesheet' },
     { key: 'timeline',  label: 'Timeline' },
     { key: 'visits',    label: 'Visits',      count: chart.visits.length },
     { key: 'vitals',    label: 'Vitals',      count: chart.vitals.length },
@@ -360,12 +361,6 @@ export default function PatientChartPage() {
           )}
         </div>
 
-        {/* Diagnoses (ICD-10) */}
-        <div className="p-5 border-b border-surface-border">
-          <div className="section-title">Diagnoses (ICD-10)</div>
-          <IcdDiagnoses patientId={p.id} />
-        </div>
-
         {/* Tabs */}
         <div className="flex gap-0 px-3 overflow-x-auto border-b border-surface-border">
           {TABS.map(t => (
@@ -386,6 +381,8 @@ export default function PatientChartPage() {
       </div>
 
       {/* ── Timeline ── */}
+      {tab === 'facesheet' && <Facesheet patient={p} />}
+
       {tab === 'timeline' && (
         <div className="card p-5">
           <div className="section-title">Complete Patient History</div>
