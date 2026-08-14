@@ -71,7 +71,8 @@ def _frequency_sql(patient_scoped: bool) -> str:
                p.first_name, p.last_name
         FROM frequency_orders fo
         JOIN patients p ON p.id = fo.patient_id
-        WHERE fo.status = 'active' {order_filter}
+        WHERE fo.status = 'active'
+          AND p.status = 'active' AND p.deleted_at IS NULL {order_filter}
     ),
     weeks AS (
         SELECT o.*, gs.week_index,
@@ -154,7 +155,8 @@ async def alert_feed(
                p.first_name, p.last_name
         FROM tracked_documents d
         LEFT JOIN patients p ON p.id = d.patient_id
-        WHERE d.status = 'active' AND d.expires_on <= CURRENT_DATE + 60 {doc_filter}
+        WHERE d.status = 'active' AND d.expires_on <= CURRENT_DATE + 60
+          AND (d.patient_id IS NULL OR (p.status = 'active' AND p.deleted_at IS NULL)) {doc_filter}
         ORDER BY d.expires_on
     """), params)).mappings().all()
     for r in doc_rows:
