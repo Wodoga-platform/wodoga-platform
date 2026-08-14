@@ -6,9 +6,11 @@
  * Drop onto the dashboard:  <AlertsPanel />
  * Or scope to one patient:  <AlertsPanel patientId={id} />
  *
- * Uses react-query + the shared UI primitives, matching the existing pages.
+ * Uses react-query + the shared UI primitives + the app's design tokens
+ * (surface/ink/semantic colors), so it matches the theme and dark mode.
  */
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
@@ -17,7 +19,7 @@ import {
 import { Badge, Spinner, EmptyState } from '@/components/ui';
 import { clinicalService, type ClinicalAlert, type AlertSeverity } from '@/services/clinical';
 
-const SEVERITY_BADGE: Record<AlertSeverity, string> = {
+const SEVERITY_BADGE: Record<AlertSeverity, 'red' | 'amber' | 'blue' | 'gray'> = {
   high: 'red', medium: 'amber', low: 'blue', info: 'gray',
 };
 const KIND_ICON: Record<string, any> = {
@@ -31,6 +33,7 @@ const KIND_ICON: Record<string, any> = {
 
 export function AlertsPanel({ patientId }: { patientId?: string }) {
   const router = useRouter();
+  const [showAll, setShowAll] = useState(false);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['clinical-alerts', patientId ?? 'agency'],
     queryFn: () => clinicalService.alerts(patientId),
@@ -38,10 +41,17 @@ export function AlertsPanel({ patientId }: { patientId?: string }) {
   });
 
   if (isLoading) return <div className="flex justify-center p-8"><Spinner /></div>;
-  if (isError) return <p className="text-sm text-red-600 p-4">Couldn’t load alerts.</p>;
+  if (isError) return <p className="text-sm text-red p-4">Couldn’t load alerts.</p>;
   if (!data || data.count === 0)
     return <EmptyState icon={Inbox} title="No open alerts"
              description="Frequency, documents, and code-status checks are all clear." />;
+
+  // Agency-wide view defaults to high-severity only to stay quiet; the
+  // folder view (patientId set) always shows everything for that patient.
+  const agency = !patientId;
+  const shown = agency && !showAll
+    ? data.alerts.filter((a) => a.severity === 'high')
+    : data.alerts;
 
   return (
     <div className="space-y-2">
@@ -49,31 +59,39 @@ export function AlertsPanel({ patientId }: { patientId?: string }) {
         {(['high', 'medium', 'low', 'info'] as AlertSeverity[])
           .filter((s) => data.counts_by_severity[s] > 0)
           .map((s) => (
-            <Badge key={s} variant={SEVERITY_BADGE[s] as any}>
+            <Badge key={s} variant={SEVERITY_BADGE[s]}>
               {data.counts_by_severity[s]} {s}
             </Badge>
           ))}
+        {agency && data.count > shown.length && (
+          <button onClick={() => setShowAll(true)}
+            className="text-xs text-forest font-semibold ml-auto">
+            Show all {data.count}
+          </button>)}
+        {agency && showAll && (
+          <button onClick={() => setShowAll(false)}
+            className="text-xs text-ink-3 font-semibold ml-auto">Show high only</button>)}
       </div>
-      {data.alerts.map((a: ClinicalAlert, i: number) => {
+      {shown.map((a: ClinicalAlert, i: number) => {
         const Icon = KIND_ICON[a.kind] ?? AlertTriangle;
         return (
           <button
             key={i}
             onClick={() => a.patient_id && router.push(`/patients/${a.patient_id}`)}
             className="w-full text-left flex items-start gap-3 rounded-lg border
-                       border-gray-200 bg-white p-3 hover:bg-gray-50 transition"
+                       border-surface-border bg-surface p-3 hover:bg-bg transition-colors"
           >
-            <Icon className="h-5 w-5 mt-0.5 shrink-0 text-gray-500" />
+            <Icon className="h-5 w-5 mt-0.5 shrink-0 text-ink-3" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <Badge variant={SEVERITY_BADGE[a.severity] as any}>{a.severity}</Badge>
+                <Badge variant={SEVERITY_BADGE[a.severity]}>{a.severity}</Badge>
                 {a.patient_name && a.patient_name !== 'Agency-level' && (
-                  <span className="text-sm font-medium text-gray-900 truncate">
+                  <span className="text-sm font-medium text-ink truncate">
                     {a.patient_name}
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-700 mt-0.5">{a.title}</p>
+              <p className="text-sm text-ink-2 mt-0.5">{a.title}</p>
             </div>
           </button>
         );
